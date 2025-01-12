@@ -14,7 +14,7 @@ A simple and flexible logging system implemented in C++ that allows for customiz
 - `main.cpp`: The main application demonstrating the logging system.
 - `logger.h`: Header file defining the logging system's interface and data structures.
 - `logger.cpp`: Implementation of the logging system.
-- `util.h / util.cpp`: Utility functions used within the logger (not provided in the original request, but assumed to exist).
+- `util.h / util.cpp`: Utility functions used within the logger.
 
 ## Getting Started
 
@@ -78,7 +78,7 @@ For example:
   logger::init("[$B$T:$J$E - $B$A $F:$G$E] $C$Z");
   ```
 ### Logging Levels
-You can control which log levels are enabled by modifying the LOG_LEVEL_ENABLED define in logger.h. The levels are:
+You can control which log levels are enabled by modifying the `LOG_LEVEL_ENABLED` define in logger.h. The levels are:
 
 - 0: Fatal + Error
 - 1: Fatal + Error + Warn
