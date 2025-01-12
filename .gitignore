@@ -1,6 +1,14 @@
 # Prerequisites
 *.d
 
+.vscode/
+logging_test
+
+# results
+/logs
+logs/
+**.log
+
 # Compiled Object files
 *.slo
 *.lo
