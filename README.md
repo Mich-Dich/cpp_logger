@@ -26,7 +26,7 @@ A simple and flexible logging system implemented in C++ that allows for customiz
 
 1. Clone the repository:
   ```bash
-  git clone https://github.com/yourusername/logger-system.git
+  git clone git@github.com:Mich-Dich/cpp_logger.git
   cd cpp_logger
   ```
 
