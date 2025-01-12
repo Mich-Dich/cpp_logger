@@ -1,25 +1,17 @@
 
-
 #include <iostream>
-#include <cstdarg>
 #include <thread>
 #include <condition_variable>
 #include <atomic>
 #include <queue>
-#include <memory>
-#include <sstream>
+#include <map>
 #include <string>
 #include <cstring>
-#include <list>
-#include <map>
-#include <type_traits>
-#include <stdio.h>
 #include <fstream>
-#include <iomanip>
 
-#if defined PLATFORM_WINDOWS
+#if defined __WIN32__
     #include <Windows.h>
-#elif defined PLATFORM_LINUX
+#elif defined __unix__
     #include <time.h>
     #include <sys/time.h>
     #include <ctime>
@@ -30,26 +22,26 @@
 
 namespace logger {
 
-#define SETW(width)                     std::setw(width) << std::setfill('0')
+#define SETW(width)                                 std::setw(width) << std::setfill('0')
 
-#define PROJECT_FOLDER                  "PFF"
+#define PROJECT_FOLDER                              "PFF"
 
-#define SHORTEN_FILE_PATH(text)         (strstr(text, PROJECT_FOLDER) ? strstr(text, PROJECT_FOLDER) + strlen(PROJECT_FOLDER) + 1 : text)
-#define SHORT_FILE(text)                (strrchr(text, "\\") ? strrchr(text, "\\") + 1 : text)
-#define SHORTEN_FUNC_NAME(text)         (strstr(text, "::") ? strstr(text, "::") + 2 : text)
+#define SHORTEN_FILE_PATH(text)                     (strstr(text, PROJECT_FOLDER) ? strstr(text, PROJECT_FOLDER) + strlen(PROJECT_FOLDER) + 1 : text)
+#define SHORT_FILE(text)                            (strrchr(text, "\\") ? strrchr(text, "\\") + 1 : text)
+#define SHORTEN_FUNC_NAME(text)                     (strstr(text, "::") ? strstr(text, "::") + 2 : text)
 
 
-    static bool                         is_init = false;
-    static std::string                  format_current = "";
-    static std::string                  format_prev = "";
-    static severity                     sev_level_to_buffer = severity::Trace;
-    static u32                          max_size_of_buffer = 0;
-    static std::filesystem::path        main_log_dir = "";
-    static std::filesystem::path        main_log_file_path = "";
-    static std::ofstream                main_file;
-    static const char*                  severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
-    static const char*                  console_reset = "\x1b[0m";
-    static const char*                  console_color_table[] = {
+    static bool                                     is_init = false;
+    static std::string                              format_current = "";
+    static std::string                              format_prev = "";
+    static severity                                 sev_level_to_buffer = severity::Trace;
+    static u32                                      max_size_of_buffer = 0;
+    static std::filesystem::path                    main_log_dir = "";
+    static std::filesystem::path                    main_log_file_path = "";
+    static std::ofstream                            main_file;
+    static const char*                              severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
+    static const char*                              console_reset = "\x1b[0m";
+    static const char*                              console_color_table[] = {
         "\x1b[38;5;246m",     // Trace: Gray
         "\x1b[94m",           // Debug: Blue
         "\x1b[92m",           // Info: Green
@@ -58,12 +50,14 @@ namespace logger {
         "\x1b[41m\x1b[30m",   // Fatal: Red Background
     };
 
-    static std::thread                     worker_thread;
-    static std::condition_variable         cv{};
-    static std::mutex                      mutex{};
-    static std::atomic<bool>               ready = false;
-    static std::atomic<bool>               stop = false;
-    static std::queue<message_format>      log_queue{};
+    static std::thread                              worker_thread;
+    static std::condition_variable                  cv{};
+    static std::mutex                               queue_mutex{};
+    static std::mutex                               file_mutex{};
+    static std::atomic<bool>                        ready = false;
+    static std::atomic<bool>                        stop = false;
+    static std::queue<message_format>               log_queue{};
+    static std::map<std::thread::id, std::string>   thread_lable_map = {};
 
     void process_queue();
     void process_log_message(const message_format message);
@@ -81,9 +75,10 @@ namespace logger {
     }
 
 
-#define OPEN_MAIN_FILE(append)              main_file = std::ofstream(main_log_file_path, (append) ? std::ios::app : std::ios::out);        \
-                                            if (!main_file.is_open())                                                                       \
-                                                DEBUG_BREAK("FAILED to open log main_file")
+#define OPEN_MAIN_FILE(append)              { if (!main_file.is_open()) {                                                                               \
+                                                main_file = std::ofstream(main_log_file_path, (append) ? std::ios::app : std::ios::out);                \
+                                                if (!main_file.is_open())                                                                               \
+                                                    DEBUG_BREAK("FAILED to open log main_file") } }
 
 #define CLOSE_MAIN_FILE()                   main_file.close();
 
@@ -134,7 +129,7 @@ namespace logger {
     void shutdown() {
 
         {
-            std::lock_guard<std::mutex> lock(mutex);
+            std::lock_guard<std::mutex> lock(queue_mutex);
             stop = true;
         }
         cv.notify_all();
@@ -157,9 +152,12 @@ namespace logger {
         format_prev = format_current;
         format_current = new_format;
 
-        OPEN_MAIN_FILE(true)
-        main_file << "Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-        CLOSE_MAIN_FILE()
+        {
+            std::lock_guard<std::mutex> lock(file_mutex);
+            OPEN_MAIN_FILE(true)
+            main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
+            CLOSE_MAIN_FILE()
+        }
     }
 
     void use_previous_format() {
@@ -168,9 +166,12 @@ namespace logger {
         format_current = format_prev;
         format_prev = buffer;
 
-        OPEN_MAIN_FILE(true);
-        main_file << "Changing to previous log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-        CLOSE_MAIN_FILE()
+        {
+            std::lock_guard<std::mutex> lock(file_mutex);
+            OPEN_MAIN_FILE(true);
+            main_file << "[LOGGER] Changing to previous log-format. From [" << format_prev << "] to [" << format_current << "]\n";
+            CLOSE_MAIN_FILE()
+        }
     }
 
     const std::string get_format() { return format_current; }
@@ -181,6 +182,42 @@ namespace logger {
         max_size_of_buffer = new_max_size_of_buffer;
     }
 
+    void register_label_for_thread(const std::string& thread_lable, std::thread::id thread_id) {
+
+        std::lock_guard<std::mutex> lock(file_mutex);
+        OPEN_MAIN_FILE(true);
+        if (thread_lable_map.find(thread_id) != thread_lable_map.end()) {
+
+            main_file << "[LOGGER] Thread with ID: [" << thread_id << "] already has lable [" << thread_lable_map[thread_id] << "] registered. Overriding with the lable: [" << thread_lable << "]\n";
+            thread_lable_map[thread_id] = thread_lable;
+        }
+        else {
+
+            main_file << "[LOGGER] Registering Thread-ID: [" << thread_id << "] with the lable: [" << thread_lable << "]\n";
+            thread_lable_map.emplace(thread_id, thread_lable);
+        }
+        CLOSE_MAIN_FILE()
+    }
+
+    void unregister_label_for_thread(std::thread::id thread_id) {
+
+        if (thread_lable_map.find(thread_id) == thread_lable_map.end()) {
+            
+            std::lock_guard<std::mutex> lock(file_mutex);
+            OPEN_MAIN_FILE(true)
+            main_file << "[LOGGER] Tried to unregister lable for Thread-ID: [" << thread_id << "]. IGNORED\n";
+            CLOSE_MAIN_FILE()
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(file_mutex);
+        OPEN_MAIN_FILE(true)
+        main_file << "[LOGGER] Unregistering Thread-ID: [" << thread_id << "] with the lable: [" << thread_lable_map[thread_id] << "]\n";
+        CLOSE_MAIN_FILE()
+
+        thread_lable_map.erase(thread_id);
+    }
+
     // ====================================================================================================================================
     // log message handeling
     // ====================================================================================================================================
@@ -189,9 +226,10 @@ namespace logger {
 
         while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
 
-            std::unique_lock<std::mutex> lock(mutex);
-            cv.wait(lock, [] { return !log_queue.empty() || stop; });
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            cv.wait(lock, [] { return !log_queue.empty(); });
 
+            std::lock_guard<std::mutex> file_lock(file_mutex);
             OPEN_MAIN_FILE(true);
             while (!log_queue.empty()) {
 
@@ -208,14 +246,14 @@ namespace logger {
         }
     }
 
-    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, std::string message ) {
+    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string message) {
         
         if (!is_init)
             DEBUG_BREAK("logger::log_msg() was called bevor initalizing logger")
 
         {
-            std::lock_guard<std::mutex> lock(mutex);
-            log_queue.emplace(msg_sev, file_name, function_name, line, std::move(message));
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
         }
         cv.notify_all();
     }
@@ -247,10 +285,11 @@ namespace logger {
                 case 'Z':   Format_Filled << std::endl; break;                                                                                                                              // Alignment
 
                 // ------------------------------------  Source  -------------------------------------------------------------------------------
+                case 'Q':   if (thread_lable_map.find(message.thread_id) != thread_lable_map.end()) {Format_Filled << thread_lable_map[message.thread_id]; } else { Format_Filled << message.thread_id; } break;      // Thread id or asosiated lable
                 case 'F':   Format_Filled << message.function_name; break;                                                                                                                  // Function Name
-                case 'P':   Format_Filled << SHORTEN_FUNC_NAME(message.function_name); break;                                                                                            // Function Name
+                case 'P':   Format_Filled << SHORTEN_FUNC_NAME(message.function_name); break;                                                                                               // Function Name
                 case 'A':   Format_Filled << message.file_name; break;                                                                                                                      // File Name
-                case 'K':   Format_Filled << SHORTEN_FILE_PATH(message.file_name); break;                                                                                                // Shortend File Name
+                case 'K':   Format_Filled << SHORTEN_FILE_PATH(message.file_name); break;                                                                                                   // Shortend File Name
                 case 'I':   Format_Filled << get_filename(message.file_name); break;                                                                                                        // Only File Name
                 case 'G':   Format_Filled << message.line; break;                                                                                                                           // Line
 

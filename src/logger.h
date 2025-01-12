@@ -2,11 +2,20 @@
 #include <string>
 #include <filesystem>
 #include <exception>
+#include <thread>
 
 #include "util.h"
 
 namespace logger {
 
+    // Define the severity levels for logging
+    // @note severity Enum representing the levels of logging severity
+    // @note Trace The lowest level, used for tracing program execution
+    // @note Debug Used for detailed debug information
+    // @note Info Informational messages that highlight progress
+    // @note Warn Messages for potentially harmful situations
+    // @note Error Error events that might still allow the application to continue
+    // @note Fatal Severe error events that lead to application shutdown
     enum class severity : u8 {
         Trace = 0,
         Debug,
@@ -16,15 +25,23 @@ namespace logger {
         Fatal,
     };
 
+    // Structure to represent the format of a log message
+    // @struct message_format Encapsulates details for a log message
+    // @param msg_sev The severity level of the message
+    // @param file_name The name of the file where the log message originated
+    // @param function_name The function name where the log message was generated
+    // @param line The line number in the source file of the log message
+    // @param message The actual log message content
     struct message_format {
 
-        message_format(const logger::severity msg_sev, const char* file_name, const char* function_name, const int line, const std::string& message) 
-            : msg_sev(msg_sev), file_name(file_name), function_name(function_name), line(line), message(message) {};
+        message_format(const logger::severity msg_sev, const char* file_name, const char* function_name, const int line, std::thread::id thread_id, const std::string& message) 
+            : msg_sev(msg_sev), file_name(file_name), function_name(function_name), line(line), thread_id(thread_id), message(message) {};
 
         const logger::severity  msg_sev;
         const char*             file_name;
         const char*             function_name;
         const int               line;
+        const std::thread::id   thread_id;
         const std::string       message;
     };
 
@@ -44,7 +61,7 @@ namespace logger {
     //
     // @param $T time                    hh:mm:ss
     // @param $H hour                    hh
-    // @param $H minute                  mm
+    // @param $M minute                  mm
     // @param $S secunde                 ss
     // @param $J millisecunde            jjj
     //      
@@ -53,6 +70,7 @@ namespace logger {
     // @param $O data month              mm
     // @param $D data day                dd
     //
+    // @param $M thread                  Thread_id: 137575225550656 or a lable if provided
     // @param $F function name           application::main, math::foo
     // @param $P only function name      main, foo
     // @param $A file name               C:/project/main.cpp  ~/project/main.cpp
@@ -81,14 +99,21 @@ namespace logger {
     // @param new_max_size_of_buffer set the number of messages that can be buffered bevor wrinting to file
     void set_buffer_settings(const severity sev_level, const u32 new_max_size_of_buffer);
 
+    void register_label_for_thread(const std::string& thread_lable, std::thread::id thread_id = std::this_thread::get_id());
+    
+    void unregister_label_for_thread(std::thread::id thread_id = std::this_thread::get_id());
+
     // // THIS SHOULD NEVER BE DIRECTLY CALLED
     // // @note empty log messages will be ignored
-    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, std::string message );
+    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string message);
 }
 
 
 
 
+// Exception to represent a debug break
+// @class debug_break_exception Exception type for debug breaks
+// @param message The error message associated with the debug break
 class debug_break_exception : public std::exception {
 public:
     explicit debug_break_exception(const std::string& message)
@@ -100,6 +125,11 @@ private:
     std::string m_msg;
 };
 
+
+// Macro to trigger a debug break with detailed context
+// @param message The custom message to include in the debug break exception
+// @note DEBUG_BREAK Triggers a debug break exception with a formatted message
+// @note Constructs a detailed message containing the file name, function name, and line number
 #define DEBUG_BREAK(message)                { std::ostringstream oss; oss << "DEBUG BREAK [file: " __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message; throw debug_break_exception(oss.str()); }
 
 
@@ -118,33 +148,40 @@ private:
 //  =================================================================================== Logger  ===================================================================================
 
 // always enabled
-#define LOG_Error(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::move(oss.str())); }
-#define LOG_Fatal(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Error, __FILE__, __FUNCTION__, __LINE__, std::move(oss.str())); }
+#define LOG_Fatal(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
+#define LOG_Error(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Error, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
 
 #if LOG_LEVEL_ENABLED > 0
-    #define LOG_Warn(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Warn, __FILE__, __FUNCTION__, __LINE__, std::move(oss.str())); }
+    #define LOG_Warn(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Warn, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
 #else
-    #define LOG_Warn(message)
+    #define LOG_Warn(message)               { }
 #endif
 
 #if LOG_LEVEL_ENABLED > 1
-    #define LOG_Info(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Info, __FILE__, __FUNCTION__, __LINE__, std::move(oss.str())); }
+    #define LOG_Info(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Info, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
 #else
-    #define LOG_Info(message)
+    #define LOG_Info(message)               { }
 #endif
 
 #if LOG_LEVEL_ENABLED > 2
-    #define LOG_Debug(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Debug, __FILE__, __FUNCTION__, __LINE__, std::move(oss.str())); }
+    #define LOG_Debug(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Debug, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
 #else
-    #define LOG_Debug(message)
+    #define LOG_Debug(message)              { }
 #endif
 
 #if LOG_LEVEL_ENABLED > 3
-    #define LOG_Trace(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Trace, __FILE__, __FUNCTION__, __LINE__, std::move(oss.str())); }
+    #define LOG_Trace(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Trace, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
 #else
-    #define LOG_Trace(message)
+    #define LOG_Trace(message)              { }
 #endif
 
+// General logging macro for all severity levels
+// @note LOG Routes log messages to the appropriate severity level
+// @param severity The severity level of the log (e.g., Trace, Debug, Info, Warn, Error, Fatal)
+// @param message The message to be logged
+// @note This macro resolves to one of the specific logging macros (e.g., LOG_Trace, LOG_Debug) based on the provided severity
+// @note LOG(Info, "This is an informational message");
+// @note LOG(Error, "An error occurred while processing the request");
 #define LOG(severity, message)              LOG_##severity(message)
 
 // ---------------------------------------------------------------------------  Assertion & Validation  ---------------------------------------------------------------------------
