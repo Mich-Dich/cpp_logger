@@ -105,7 +105,7 @@ namespace logger {
 
     // // THIS SHOULD NEVER BE DIRECTLY CALLED
     // // @note empty log messages will be ignored
-    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string message);
+    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string& message);
 }
 
 
@@ -148,31 +148,33 @@ private:
 //  =================================================================================== Logger  ===================================================================================
 
 // always enabled
-#define LOG_Fatal(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
-#define LOG_Error(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Error, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
+#define LOG_Fatal(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
+#define LOG_Error(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Error, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
 
 #if LOG_LEVEL_ENABLED > 0
-    #define LOG_Warn(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Warn, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
+    #define LOG_Warn(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Warn, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
 #else
     #define LOG_Warn(message)               { }
 #endif
 
 #if LOG_LEVEL_ENABLED > 1
-    #define LOG_Info(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Info, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
+    #define LOG_Info(message)               { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Info, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
 #else
     #define LOG_Info(message)               { }
 #endif
 
 #if LOG_LEVEL_ENABLED > 2
-    #define LOG_Debug(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Debug, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
+    #define LOG_Debug(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Debug, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
 #else
     #define LOG_Debug(message)              { }
 #endif
 
 #if LOG_LEVEL_ENABLED > 3
-    #define LOG_Trace(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Trace, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), std::move(oss.str())); }
+    #define LOG_Trace(message)              { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Trace, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
+    #define LOG_SEPERATOR                   { logger::log_msg(logger::severity::Trace, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), "-------------------------------------------------------------"); }
 #else
     #define LOG_Trace(message)              { }
+    #define LOG_SEPERATOR                   { }
 #endif
 
 // General logging macro for all severity levels
@@ -207,18 +209,18 @@ private:
 
 
 #if ENABLE_LOGGING_OF_VALIDATION
-    #define VALIDATE(expr, ReturnCommand, successMsg, failureMsg)			\
+    #define VALIDATE(expr, command, successMsg, failureMsg)			        \
                     if (expr) 												\
                         LOG(Trace, successMsg)							    \
                     else {													\
                         LOG(Warn, failureMsg)							    \
-                        ReturnCommand;										\
+                        command;										    \
                     }
 
-    #define VALIDATE_S(expr, ReturnCommand)									\
+    #define VALIDATE_S(expr, command)									    \
                     if (!(expr)) {											\
                         LOG(Warn, "Validation Failed: " << #expr)		    \
-                        ReturnCommand;										\
+                        command;										    \
                     }
 #else
     #define VALIDATE(expr, ReturnCommand, successMsg, failureMsg)			if (!(expr)) { ReturnCommand; }

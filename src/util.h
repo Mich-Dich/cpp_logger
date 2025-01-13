@@ -29,6 +29,9 @@ namespace util {
     #define DEFAULT_GETTER_C(type, name)						type get_##name() const { return m_##name;}
     #define DEFAULT_GETTER_POINTER(type, name)					type* get_##name##_pointer() { return &m_##name;}
 
+    #define BIT(shift_amount)                                   (1 << shift_amount)
+    #define GET_BIT(variable, shift_amount)                     ((variable >> shift_amount) & 1)
+
 	struct system_time {
 
 		u16 year;
@@ -66,7 +69,7 @@ namespace util {
     public:
 
         stopwatch(f32* result_pointer, duration_precision presition = duration_precision::milliseconds)
-            : m_result_pointer(result_pointer), m_presition(presition) { _start(); }
+            : m_result_pointer(result_pointer), m_presition(presition), m_start_point(std::chrono::system_clock::now()) { }
 
         ~stopwatch() { stop(); }
 
@@ -84,10 +87,10 @@ namespace util {
 
         void _start();
 
+        f32*                                        m_result_pointer{};
         duration_precision                          m_presition;
         std::chrono::system_clock::time_point       m_start_point{};
         f32                                         m_result = 0.f;
-        f32*                                        m_result_pointer = &m_result;
     };
 
 #define ISOLATED_PROFILER_LOOP(num_of_iterations, message, profile_duration_precision, func)                                                                                                                     \

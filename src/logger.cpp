@@ -149,12 +149,11 @@ namespace logger {
 
     void set_format(const std::string& new_format) {
 
-        format_prev = format_current;
-        format_current = new_format;
-
         {
             std::lock_guard<std::mutex> lock(file_mutex);
             OPEN_MAIN_FILE(true)
+            format_prev = format_current;
+            format_current = new_format;
             main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
             CLOSE_MAIN_FILE()
         }
@@ -246,8 +245,11 @@ namespace logger {
         }
     }
 
-    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string message) {
+    void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string& message) {
         
+        if (message.empty())
+            return;                      // dont log empty lines
+
         if (!is_init)
             DEBUG_BREAK("logger::log_msg() was called bevor initalizing logger")
 
