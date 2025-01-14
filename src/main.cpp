@@ -30,7 +30,7 @@ int main (int argc, char* argv[]) {
             if (argv[x][0] != '-')                                  // Not an option because it doesnt start with '-'
                 continue;
 
-            for (int y = 0; argv[x][y] != '\0'; y++) {                    
+            for (int y = 0; argv[x][y] != '\0'; y++) {
                 switch (argv[x][y]) {                               // register arguments
                     case 's': enabled_options |= BIT(0); break;
                     case 'm': enabled_options |= BIT(1); break;
@@ -66,7 +66,7 @@ int main (int argc, char* argv[]) {
         LOG_SEPERATOR
         LOG(Trace, "Testing ASSERT() macroValue of test_int: " << test_int)
         ASSERT(test_int == 0, "ASSERT(test_int == 0): correct", "assert 0: FALSE")
-        // ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
+        ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
     }
 
     if (GET_BIT(enabled_options, 1)) {

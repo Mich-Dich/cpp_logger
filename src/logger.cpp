@@ -8,6 +8,7 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+#include <csignal>
 
 #if defined __WIN32__
     #include <Windows.h>
@@ -221,7 +222,22 @@ namespace logger {
     // log message handeling
     // ====================================================================================================================================
 
+    void shutdown_signal(const int signal) {
+        
+        std::cerr << "Detected interup signal!!  shuting down logger" << std::endl;
+        logger::shutdown();    
+    }
+    void shutdown_atexit() {
+        
+        std::cerr << "Detected interup signal!!  shuting down logger" << std::endl;
+        logger::shutdown();    
+    }
+
     void process_queue() {
+
+        std::signal(SIGINT, shutdown_signal);
+        std::signal(SIGTERM, shutdown_signal);
+        std::atexit([]() { shutdown(); } );
 
         while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
 
