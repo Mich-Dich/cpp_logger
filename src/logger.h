@@ -47,10 +47,11 @@ namespace logger {
 
     // Initalize the logging system
     // @param format The iital log message foemat
+    // @param log_to_console should the log message be written to std::cout?
     // @param log_dir the directory that will contain all log files
     // @ main_log_file_name name of the central log_file (the thread that runs logger::init())
     // @param use_append_mode Should the system write over the existing log file or append to it
-    bool init(const std::string& format, const std::filesystem::path log_dir = "./logs", const std::string& main_log_file_name = "general.log", const bool use_append_mode = false);
+    bool init(const std::string& format, const bool log_to_console = false, const std::filesystem::path log_dir = "./logs", const std::string& main_log_file_name = "general.log", const bool use_append_mode = false);
 
     // shutdown the logging system
     void shutdown();
@@ -73,8 +74,7 @@ namespace logger {
     // @param $M thread                  Thread_id: 137575225550656 or a lable if provided
     // @param $F function name           application::main, math::foo
     // @param $P only function name      main, foo
-    // @param $A file name               C:/project/main.cpp  ~/project/main.cpp
-    // @param $K shortend file name      project/main.cpp
+    // @param $A file name               main.cpp  project.cpp
     // @param $I only file name          main.cpp
     // @param $G line                    1, 42
     //
@@ -94,13 +94,17 @@ namespace logger {
     // get the currently used log-message format
     const std::string get_format();
 
-    // define with messages severitys should be written to log directly and witch can be buffered
-    // @param sev_level 0 => write all logs directly to file | 1 => buffer: TRACE | 2 => buffer: TRACE + DEBUG | 3 => buffer: TRACE + DEBUG + INFO | 4 => buffer: TRACE + DEBUG + INFO + WARN
-    // @param new_max_size_of_buffer set the number of messages that can be buffered bevor wrinting to file
-    void set_buffer_settings(const severity sev_level, const u32 new_max_size_of_buffer);
-
+    // Registers a label for a specific thread, allowing for easier identification in logs.
+    // If a label is already registered for the given thread ID, it will be overridden with the new label.
+    // @param thread_label The label to be associated with the thread.
+    // @param thread_id The ID of the thread for which the label is being registered. 
+    //                  Defaults to the ID of the calling thread if not provided.
     void register_label_for_thread(const std::string& thread_lable, std::thread::id thread_id = std::this_thread::get_id());
     
+    // Unregisters the label for a specific thread, removing its association from the logger.
+    // If no label is registered for the given thread ID, a message will be logged indicating that the operation was ignored.
+    // @param thread_id The ID of the thread for which the label is being unregistered. 
+    //                  Defaults to the ID of the calling thread if not provided.
     void unregister_label_for_thread(std::thread::id thread_id = std::this_thread::get_id());
 
     // // THIS SHOULD NEVER BE DIRECTLY CALLED
@@ -117,7 +121,7 @@ namespace logger {
 class debug_break_exception : public std::exception {
 public:
     explicit debug_break_exception(const std::string& message)
-        : m_msg(message) {}
+        : m_msg(message) { logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), m_msg); }
 
     virtual const char* what() const noexcept override { return m_msg.c_str(); }
 
@@ -125,14 +129,13 @@ private:
     std::string m_msg;
 };
 
-
 // Macro to trigger a debug break with detailed context
 // @param message The custom message to include in the debug break exception
 // @note DEBUG_BREAK Triggers a debug break exception with a formatted message
 // @note Constructs a detailed message containing the file name, function name, and line number
-#define DEBUG_BREAK(message)                { std::ostringstream oss; oss << "DEBUG BREAK [file: " __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message; throw debug_break_exception(oss.str()); }
-
-
+#define DEBUG_BREAK(message)                { std::ostringstream oss;                                                                                                           \
+                                                oss << "DEBUG BREAK [file: " __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message;         \
+                                                throw debug_break_exception(oss.str()); }
 
 // This define enables the diffrent log levels (FATAL & ERROR are always on)
 //  0 => FATAL + ERROR
@@ -146,6 +149,9 @@ private:
 #define ENABLE_LOGGING_OF_VALIDATION        1
 
 //  =================================================================================== Logger  ===================================================================================
+
+// I use std::ostringstream here instead of lamdas because the logger runs async and I want to capture the values in pointers/refs in the moment the macro is called
+// This costs some performance but is more useful when debugging an application
 
 // always enabled
 #define LOG_Fatal(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }

@@ -7,10 +7,12 @@
 #define LOGGING_LOOP(iterations)            for (u32 x = 0; x < iterations; x++) LOG(Trace, "Log message: " << x);
 void test_logger_multithreaded(const u32 count) {
 
+    logger::register_label_for_thread("worker slave");
     logger::register_label_for_thread("worker 01");
 
-    LOG(Debug, "Beginning test function");    
+    LOG(Debug, "Beginning test function");
     LOGGING_LOOP(count)
+    DEBUG_BREAK("Testing multithreaded DEBUG_BREAK")
     LOG(Debug, "Ending test function");    
 }
 
@@ -66,7 +68,7 @@ int main (int argc, char* argv[]) {
         LOG_SEPERATOR
         LOG(Trace, "Testing ASSERT() macroValue of test_int: " << test_int)
         ASSERT(test_int == 0, "ASSERT(test_int == 0): correct", "assert 0: FALSE")
-        ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
+        // ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
     }
 
     if (GET_BIT(enabled_options, 1)) {
@@ -84,3 +86,6 @@ int main (int argc, char* argv[]) {
     logger::shutdown();
     return 0;
 }
+
+// clear && g++ -o logging_test main.cpp logger.cpp util.cpp
+// ./logging_test -sm

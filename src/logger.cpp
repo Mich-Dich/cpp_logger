@@ -4,11 +4,17 @@
 #include <condition_variable>
 #include <atomic>
 #include <queue>
-#include <map>
+#include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <cstring>
 #include <fstream>
-#include <csignal>
+#include <vector>
+#include <algorithm>        // sort, unique
+#include <system_error>
+#include <signal.h> // sigaction
+
+// the gracefull signal handeling was inspired by reckless_log: https://github.com/mattiasflodin/reckless
 
 #if defined __WIN32__
     #include <Windows.h>
@@ -23,53 +29,53 @@
 
 namespace logger {
 
-#define SETW(width)                                 std::setw(width) << std::setfill('0')
+#define SETW(width)                                             std::setw(width) << std::setfill('0')
+#define SHORT_FILE(text)                                        (strrchr(text, "\\") ? strrchr(text, "\\") + 1 : text)
+#define SHORTEN_FUNC_NAME(text)                                 (strstr(text, "::") ? strstr(text, "::") + 2 : text)
 
-#define PROJECT_FOLDER                              "PFF"
+    // const after init() and bevor shutdown()
+    static bool                                                 is_init = false;
+    static bool                                                 write_logs_to_console = false;
+    static std::filesystem::path                                main_log_dir = "";
+    static std::filesystem::path                                main_log_file_path = "";
+    static std::thread                                          worker_thread;
 
-#define SHORTEN_FILE_PATH(text)                     (strstr(text, PROJECT_FOLDER) ? strstr(text, PROJECT_FOLDER) + strlen(PROJECT_FOLDER) + 1 : text)
-#define SHORT_FILE(text)                            (strrchr(text, "\\") ? strrchr(text, "\\") + 1 : text)
-#define SHORTEN_FUNC_NAME(text)                     (strstr(text, "::") ? strstr(text, "::") + 2 : text)
+    // thread savety related
+    static std::condition_variable                              cv{};
+    static std::mutex                                           queue_mutex{};                      // only queue related
+    static std::mutex                                           general_mutex{};                    // for everything else
+    static std::atomic<bool>                                    ready = false;
+    static std::atomic<bool>                                    stop = false;
 
-
-    static bool                                     is_init = false;
-    static std::string                              format_current = "";
-    static std::string                              format_prev = "";
-    static severity                                 sev_level_to_buffer = severity::Trace;
-    static u32                                      max_size_of_buffer = 0;
-    static std::filesystem::path                    main_log_dir = "";
-    static std::filesystem::path                    main_log_file_path = "";
-    static std::ofstream                            main_file;
-    static const char*                              severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
-    static const char*                              console_reset = "\x1b[0m";
-    static const char*                              console_color_table[] = {
-        "\x1b[38;5;246m",     // Trace: Gray
-        "\x1b[94m",           // Debug: Blue
-        "\x1b[92m",           // Info: Green
-        "\x1b[33m",           // Warn: Yellow
-        "\x1b[31m",           // Error: Red
-        "\x1b[41m\x1b[30m",   // Fatal: Red Background
+    // always const variables
+    static const char*                                          severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
+    static const char*                                          console_reset = "\x1b[0m";
+    static const char*                                          console_color_table[] = {
+        "\x1b[38;5;246m",                                           // Trace: Gray
+        "\x1b[94m",                                                 // Debug: Blue
+        "\x1b[92m",                                                 // Info: Green
+        "\x1b[33m",                                                 // Warn: Yellow
+        "\x1b[31m",                                                 // Error: Red
+        "\x1b[41m\x1b[30m",                                         // Fatal: Red Background
     };
 
-    static std::thread                              worker_thread;
-    static std::condition_variable                  cv{};
-    static std::mutex                               queue_mutex{};
-    static std::mutex                               file_mutex{};
-    static std::atomic<bool>                        ready = false;
-    static std::atomic<bool>                        stop = false;
-    static std::queue<message_format>               log_queue{};
-    static std::map<std::thread::id, std::string>   thread_lable_map = {};
+    static std::string                                          format_current = "";
+    static std::string                                          format_prev = "";
+    static std::ofstream                                        main_file;
+    static std::queue<message_format>                           log_queue{};
+    static std::unordered_map<std::thread::id, std::string>     thread_lable_map = {};
 
     void process_queue();
     void process_log_message(const message_format message);
+    void detach_crash_handler();
 
-    inline static const char* get_filename(const char* filepath) {
+    inline const char* get_filename(const char* filepath) {
 
         const char* filename = std::strrchr(filepath, '\\');
-        if (filename == nullptr) 
+        if (filename == nullptr)
             filename = std::strrchr(filepath, '/');
 
-        if (filename == nullptr) 
+        if (filename == nullptr)
             return filepath;  // No path separator found, return the whole string
 
         return filename + 1;  // Skip the path separator
@@ -89,13 +95,14 @@ namespace logger {
     // init / shutdown
     // ====================================================================================================================================
 
-    bool init(const std::string& format, const std::filesystem::path log_dir, const std::string& main_log_file_name, const bool use_append_mode) {
+    bool init(const std::string& format, const bool log_to_console, const std::filesystem::path log_dir, const std::string& main_log_file_name, const bool use_append_mode) {
 
         if (is_init)
             DEBUG_BREAK("Tryed to init lgging system multiple times")
 
         format_current = format;
         format_prev = format;
+        write_logs_to_console = log_to_console;
 
         if (!std::filesystem::is_directory(log_dir))                            // if not already created
             if (!std::filesystem::create_directory(log_dir))                    // try to create dir
@@ -129,12 +136,13 @@ namespace logger {
 
     void shutdown() {
 
-        {
-            std::lock_guard<std::mutex> lock(queue_mutex);
-            stop = true;
-        }
+        if (!is_init)
+            DEBUG_BREAK("logger::shutdown() was called bevor logger was initalized")
+
+        stop = true;
         cv.notify_all();
-        
+        detach_crash_handler();
+
         if (worker_thread.joinable())
             worker_thread.join();
 
@@ -145,72 +153,86 @@ namespace logger {
     }
 
     // ====================================================================================================================================
+    // signal handeling         need to catch signals related to termination to flash remaining log messages
+    // ====================================================================================================================================
+
+    const std::initializer_list<int> signals = {
+        SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGKILL, SIGSEGV, SIGPIPE, SIGALRM, SIGTERM, SIGUSR1, SIGUSR2,    // POSIX.1-1990 signals
+        SIGBUS, SIGPOLL, SIGPROF, SIGSYS, SIGTRAP, SIGVTALRM, SIGXCPU, SIGXFSZ,                                             // SUSv2 + POSIX.1-2001 signals
+        SIGIOT, SIGSTKFLT, SIGIO, SIGPWR,                                                                                   // Various other signals
+    };
+    std::vector<std::pair<int, struct sigaction>> g_old_sigactions;
+
+    void signal_handler(const int signal) {
+
+        logger::shutdown();
+    }
+
+    void detach_crash_handler() {
+
+        while(!g_old_sigactions.empty()) {
+            auto const& p = g_old_sigactions.back();
+            auto signal = p.first;
+            auto const& oldact = p.second;
+            if(0 != sigaction(signal, &oldact, nullptr))
+                throw std::system_error(errno, std::system_category());
+            g_old_sigactions.pop_back();
+        }
+    }
+
+    // ====================================================================================================================================
     // settings
     // ====================================================================================================================================
 
     void set_format(const std::string& new_format) {
 
-        {
-            std::lock_guard<std::mutex> lock(file_mutex);
-            OPEN_MAIN_FILE(true)
-            format_prev = format_current;
-            format_current = new_format;
-            main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-            CLOSE_MAIN_FILE()
-        }
+        std::lock_guard<std::mutex> lock(general_mutex);
+        OPEN_MAIN_FILE(true)
+        format_prev = format_current;
+        format_current = new_format;
+        main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
+        CLOSE_MAIN_FILE()
     }
 
     void use_previous_format() {
 
+        std::lock_guard<std::mutex> lock(general_mutex);
+        OPEN_MAIN_FILE(true);
         const std::string buffer = format_current;
         format_current = format_prev;
         format_prev = buffer;
-
-        {
-            std::lock_guard<std::mutex> lock(file_mutex);
-            OPEN_MAIN_FILE(true);
-            main_file << "[LOGGER] Changing to previous log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-            CLOSE_MAIN_FILE()
-        }
+        main_file << "[LOGGER] Changing to previous log-format. From [" << format_prev << "] to [" << format_current << "]\n";
+        CLOSE_MAIN_FILE()
     }
 
     const std::string get_format() { return format_current; }
 
-    void set_buffer_settings(const severity sev_level, const u32 new_max_size_of_buffer) {
-        
-        sev_level_to_buffer = sev_level;
-        max_size_of_buffer = new_max_size_of_buffer;
-    }
-
     void register_label_for_thread(const std::string& thread_lable, std::thread::id thread_id) {
 
-        std::lock_guard<std::mutex> lock(file_mutex);
+        std::lock_guard<std::mutex> lock(general_mutex);
         OPEN_MAIN_FILE(true);
-        if (thread_lable_map.find(thread_id) != thread_lable_map.end()) {
 
+        if (thread_lable_map.find(thread_id) != thread_lable_map.end())
             main_file << "[LOGGER] Thread with ID: [" << thread_id << "] already has lable [" << thread_lable_map[thread_id] << "] registered. Overriding with the lable: [" << thread_lable << "]\n";
-            thread_lable_map[thread_id] = thread_lable;
-        }
-        else {
-
+        else
             main_file << "[LOGGER] Registering Thread-ID: [" << thread_id << "] with the lable: [" << thread_lable << "]\n";
-            thread_lable_map.emplace(thread_id, thread_lable);
-        }
+
+        thread_lable_map[thread_id] = thread_lable;
         CLOSE_MAIN_FILE()
     }
 
     void unregister_label_for_thread(std::thread::id thread_id) {
 
         if (thread_lable_map.find(thread_id) == thread_lable_map.end()) {
-            
-            std::lock_guard<std::mutex> lock(file_mutex);
+
+            std::lock_guard<std::mutex> lock(general_mutex);
             OPEN_MAIN_FILE(true)
             main_file << "[LOGGER] Tried to unregister lable for Thread-ID: [" << thread_id << "]. IGNORED\n";
             CLOSE_MAIN_FILE()
             return;
         }
 
-        std::lock_guard<std::mutex> lock(file_mutex);
+        std::lock_guard<std::mutex> lock(general_mutex);
         OPEN_MAIN_FILE(true)
         main_file << "[LOGGER] Unregistering Thread-ID: [" << thread_id << "] with the lable: [" << thread_lable_map[thread_id] << "]\n";
         CLOSE_MAIN_FILE()
@@ -222,30 +244,50 @@ namespace logger {
     // log message handeling
     // ====================================================================================================================================
 
-    void shutdown_signal(const int signal) {
-        
-        std::cerr << "Detected interup signal!!  shuting down logger" << std::endl;
-        logger::shutdown();    
-    }
-    void shutdown_atexit() {
-        
-        std::cerr << "Detected interup signal!!  shuting down logger" << std::endl;
-        logger::shutdown();    
-    }
-
     void process_queue() {
 
-        std::signal(SIGINT, shutdown_signal);
-        std::signal(SIGTERM, shutdown_signal);
-        std::atexit([]() { shutdown(); } );
+        struct sigaction act;
+        std::memset(&act, 0, sizeof(act));
+        act.sa_handler = &signal_handler;
+        sigfillset(&act.sa_mask);
+        act.sa_flags = SA_RESETHAND;
+
+        // Some signals are synonyms for each other. Some are explictly specified
+        // as such, but others may just be implemented that way on specific
+        // systems. So we'll remove duplicate entries here before we loop through
+        // all the signal numbers.
+        std::vector<int> unique_signals(signals);
+        sort(begin(unique_signals), end(unique_signals));
+        unique_signals.erase(unique(begin(unique_signals), end(unique_signals)),
+                end(unique_signals));
+        try {
+            g_old_sigactions.reserve(unique_signals.size());
+            for(auto signal : unique_signals) {
+                struct sigaction oldact;
+                if(0 != sigaction(signal, nullptr, &oldact))
+                    throw std::system_error(errno, std::system_category());
+                if(oldact.sa_handler == SIG_DFL) {
+                    if(0 != sigaction(signal, &act, nullptr))
+                    {
+                        if(errno == EINVAL)             // If we get EINVAL then we assume that the kernel does not know about this particular signal number.
+                            continue;
+
+                        throw std::system_error(errno, std::system_category());
+                    }
+                    g_old_sigactions.push_back({signal, oldact});
+                }
+            }
+        } catch(...) {
+            detach_crash_handler();
+            throw;
+        }
+
 
         while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
 
             std::unique_lock<std::mutex> lock(queue_mutex);
             cv.wait(lock, [] { return !log_queue.empty(); });
 
-            std::lock_guard<std::mutex> file_lock(file_mutex);
-            OPEN_MAIN_FILE(true);
             while (!log_queue.empty()) {
 
                 // get message from queue
@@ -257,12 +299,14 @@ namespace logger {
 
                 process_log_message(std::move(message)); // Process the message (format and write to file)
             }
-            CLOSE_MAIN_FILE()
+
+            if (lock.owns_lock())                               // savety check
+                lock.unlock();
         }
     }
 
     void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string& message) {
-        
+
         if (message.empty())
             return;                      // dont log empty lines
 
@@ -307,7 +351,6 @@ namespace logger {
                 case 'F':   Format_Filled << message.function_name; break;                                                                                                                  // Function Name
                 case 'P':   Format_Filled << SHORTEN_FUNC_NAME(message.function_name); break;                                                                                               // Function Name
                 case 'A':   Format_Filled << message.file_name; break;                                                                                                                      // File Name
-                case 'K':   Format_Filled << SHORTEN_FILE_PATH(message.file_name); break;                                                                                                   // Shortend File Name
                 case 'I':   Format_Filled << get_filename(message.file_name); break;                                                                                                        // Only File Name
                 case 'G':   Format_Filled << message.line; break;                                                                                                                           // Line
 
@@ -335,8 +378,13 @@ namespace logger {
                 Format_Filled << format_current[x];
         }
 
+        std::lock_guard<std::mutex> file_lock(general_mutex);
+        OPEN_MAIN_FILE(true);
         main_file << Format_Filled.str();
-        std::cout << Format_Filled.str();
+        CLOSE_MAIN_FILE()
+
+        if (write_logs_to_console)
+            std::cout << Format_Filled.str();
     }
 
 }
