@@ -133,9 +133,7 @@ private:
 // @param message The custom message to include in the debug break exception
 // @note DEBUG_BREAK Triggers a debug break exception with a formatted message
 // @note Constructs a detailed message containing the file name, function name, and line number
-#define DEBUG_BREAK(message)                { std::ostringstream oss;                                                                                                           \
-                                                oss << "DEBUG BREAK [file: " __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message;         \
-                                                throw debug_break_exception(oss.str()); }
+#define DEBUG_BREAK(message)                { std::ostringstream oss; oss << "DEBUG BREAK [file: " << __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message; throw debug_break_exception(oss.str()); }
 
 // This define enables the diffrent log levels (FATAL & ERROR are always on)
 //  0 => FATAL + ERROR
@@ -191,6 +189,9 @@ private:
 // @note LOG(Info, "This is an informational message");
 // @note LOG(Error, "An error occurred while processing the request");
 #define LOG(severity, message)              LOG_##severity(message)
+
+#define LOG_INIT()							LOG(Trace, "init");
+#define LOG_SHUTDOWN()						LOG(Trace, "shutdown");
 
 // ---------------------------------------------------------------------------  Assertion & Validation  ---------------------------------------------------------------------------
 

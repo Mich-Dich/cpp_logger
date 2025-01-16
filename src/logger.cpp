@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
+#include <string_view>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -48,9 +49,9 @@ namespace logger {
     static std::atomic<bool>                                    stop = false;
 
     // always const variables
-    static const char*                                          severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
-    static const char*                                          console_reset = "\x1b[0m";
-    static const char*                                          console_color_table[] = {
+    static std::string_view                                     severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
+    static std::string_view                                     console_reset = "\x1b[0m";
+    static std::string_view                                     console_color_table[] = {
         "\x1b[38;5;246m",                                           // Trace: Gray
         "\x1b[94m",                                                 // Debug: Blue
         "\x1b[92m",                                                 // Info: Green
@@ -141,7 +142,6 @@ namespace logger {
 
         stop = true;
         cv.notify_all();
-        detach_crash_handler();
 
         if (worker_thread.joinable())
             worker_thread.join();
@@ -150,34 +150,6 @@ namespace logger {
             CLOSE_MAIN_FILE()
 
         is_init = false;
-    }
-
-    // ====================================================================================================================================
-    // signal handeling         need to catch signals related to termination to flash remaining log messages
-    // ====================================================================================================================================
-
-    const std::initializer_list<int> signals = {
-        SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGKILL, SIGSEGV, SIGPIPE, SIGALRM, SIGTERM, SIGUSR1, SIGUSR2,    // POSIX.1-1990 signals
-        SIGBUS, SIGPOLL, SIGPROF, SIGSYS, SIGTRAP, SIGVTALRM, SIGXCPU, SIGXFSZ,                                             // SUSv2 + POSIX.1-2001 signals
-        SIGIOT, SIGSTKFLT, SIGIO, SIGPWR,                                                                                   // Various other signals
-    };
-    std::vector<std::pair<int, struct sigaction>> g_old_sigactions;
-
-    void signal_handler(const int signal) {
-
-        logger::shutdown();
-    }
-
-    void detach_crash_handler() {
-
-        while(!g_old_sigactions.empty()) {
-            auto const& p = g_old_sigactions.back();
-            auto signal = p.first;
-            auto const& oldact = p.second;
-            if(0 != sigaction(signal, &oldact, nullptr))
-                throw std::system_error(errno, std::system_category());
-            g_old_sigactions.pop_back();
-        }
     }
 
     // ====================================================================================================================================
@@ -246,43 +218,6 @@ namespace logger {
 
     void process_queue() {
 
-        struct sigaction act;
-        std::memset(&act, 0, sizeof(act));
-        act.sa_handler = &signal_handler;
-        sigfillset(&act.sa_mask);
-        act.sa_flags = SA_RESETHAND;
-
-        // Some signals are synonyms for each other. Some are explictly specified
-        // as such, but others may just be implemented that way on specific
-        // systems. So we'll remove duplicate entries here before we loop through
-        // all the signal numbers.
-        std::vector<int> unique_signals(signals);
-        sort(begin(unique_signals), end(unique_signals));
-        unique_signals.erase(unique(begin(unique_signals), end(unique_signals)),
-                end(unique_signals));
-        try {
-            g_old_sigactions.reserve(unique_signals.size());
-            for(auto signal : unique_signals) {
-                struct sigaction oldact;
-                if(0 != sigaction(signal, nullptr, &oldact))
-                    throw std::system_error(errno, std::system_category());
-                if(oldact.sa_handler == SIG_DFL) {
-                    if(0 != sigaction(signal, &act, nullptr))
-                    {
-                        if(errno == EINVAL)             // If we get EINVAL then we assume that the kernel does not know about this particular signal number.
-                            continue;
-
-                        throw std::system_error(errno, std::system_category());
-                    }
-                    g_old_sigactions.push_back({signal, oldact});
-                }
-            }
-        } catch(...) {
-            detach_crash_handler();
-            throw;
-        }
-
-
         while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
 
             std::unique_lock<std::mutex> lock(queue_mutex);
@@ -310,8 +245,11 @@ namespace logger {
         if (message.empty())
             return;                      // dont log empty lines
 
-        if (!is_init)
-            DEBUG_BREAK("logger::log_msg() was called bevor initalizing logger")
+        if (!is_init) {
+
+    		std::cerr << "Tryed to log message bevor logger was initalized. file_name[" << file_name << "] function_name[" << function_name << "] line[" << line << "] thread_id[" << thread_id << "]  MESSAGE: [" << message << "] " << std::endl;
+            return;
+        }
 
         {
             std::lock_guard<std::mutex> lock(queue_mutex);
