@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <chrono>
+#include <filesystem>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -29,8 +30,8 @@ namespace util {
     #define DEFAULT_GETTER_C(type, name)						type get_##name() const { return m_##name;}
     #define DEFAULT_GETTER_POINTER(type, name)					type* get_##name##_pointer() { return &m_##name;}
 
-    #define BIT(shift_amount)                                   (1 << shift_amount)
-    #define GET_BIT(variable, shift_amount)                     ((variable >> shift_amount) & 1)
+    #define BIT(shift_amount)                                   (1 << static_cast<int>(shift_amount))
+    #define GET_BIT(variable, shift_amount)                     ((variable >> static_cast<int>(shift_amount)) & 1)
 
 	struct system_time {
 
@@ -60,6 +61,13 @@ namespace util {
 
     system_time get_system_time();
 
+    const std::vector<std::pair<std::string, std::string>> default_filters = {
+        {"All Files", "*.*"},
+        {"C++ Files", "*.cpp *.h *.hpp"},
+        {"Text Files", "*.txt"},
+    };
+    std::filesystem::path file_dialog(const std::string_view title = "Open", const std::vector<std::pair<std::string, std::string>>& filters = default_filters);
+
 
     // @brief This is a lightweit stopwatch that is automaticlly started when creating an instance.
     //        It can either store the elapsed time in a provided float pointer when the stopwatch is stopped/destroyed, 
@@ -69,7 +77,7 @@ namespace util {
     public:
 
         stopwatch(f32* result_pointer, duration_precision presition = duration_precision::milliseconds)
-            : m_result_pointer(result_pointer), m_presition(presition), m_start_point(std::chrono::system_clock::now()) { }
+            : m_result_pointer(result_pointer), m_presition(presition), m_start_point(std::chrono::high_resolution_clock::now()) { }
 
         ~stopwatch() { stop(); }
 

@@ -5,17 +5,10 @@
 #include <atomic>
 #include <queue>
 #include <unordered_map>
-#include <unordered_set>
 #include <string>
 #include <string_view>
 #include <cstring>
 #include <fstream>
-#include <vector>
-#include <algorithm>        // sort, unique
-#include <system_error>
-#include <signal.h> // sigaction
-
-// the gracefull signal handeling was inspired by reckless_log: https://github.com/mattiasflodin/reckless
 
 #if defined __WIN32__
     #include <Windows.h>
@@ -33,6 +26,8 @@ namespace logger {
 #define SETW(width)                                             std::setw(width) << std::setfill('0')
 #define SHORT_FILE(text)                                        (strrchr(text, "\\") ? strrchr(text, "\\") + 1 : text)
 #define SHORTEN_FUNC_NAME(text)                                 (strstr(text, "::") ? strstr(text, "::") + 2 : text)
+
+#define LOGGER_FORMAT_CHANGE                                    "LOGGER format change"
 
     // const after init() and bevor shutdown()
     static bool                                                 is_init = false;
@@ -67,7 +62,7 @@ namespace logger {
     static std::unordered_map<std::thread::id, std::string>     thread_lable_map = {};
 
     void process_queue();
-    void process_log_message(const message_format message);
+    void process_log_message(const message_format&& message);
     void detach_crash_handler();
 
     inline const char* get_filename(const char* filepath) {
@@ -158,13 +153,20 @@ namespace logger {
 
     void set_format(const std::string& new_format) {
 
-        std::lock_guard<std::mutex> lock(general_mutex);
-        OPEN_MAIN_FILE(true)
-        format_prev = format_current;
-        format_current = new_format;
-        main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-        CLOSE_MAIN_FILE()
+        // if (!is_init) {
+
+    	// 	std::cerr << "Tryed to set logger format bevor logger was initalized" << std::endl;
+        //     return;
+        // }
+
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        log_queue.emplace(severity::Trace, "", LOGGER_FORMAT_CHANGE, 0, static_cast<std::thread::id>(0), std::move(new_format));
+        cv.notify_all();
     }
+
+    // void register_format_for_thread(const std::string& format, const std::thread::id thread_id) {
+
+    // }
 
     void use_previous_format() {
 
@@ -216,6 +218,16 @@ namespace logger {
     // log message handeling
     // ====================================================================================================================================
 
+    void process_change_in_msg_format(const message_format msg_format) {
+
+        std::lock_guard<std::mutex> lock(general_mutex);
+        OPEN_MAIN_FILE(true)
+        format_prev = format_current;
+        format_current = msg_format.message;
+        main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
+        CLOSE_MAIN_FILE()
+    }
+
     void process_queue() {
 
         while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
@@ -232,7 +244,10 @@ namespace logger {
                 log_queue.pop();
                 lock.unlock();
 
-                process_log_message(std::move(message)); // Process the message (format and write to file)
+                if (strcmp(message.function_name, LOGGER_FORMAT_CHANGE) == 0)
+                    process_change_in_msg_format(std::move(message));           // change logger format from this point onwarts
+                else
+                    process_log_message(std::move(message));                    // Process the message (format and write to file)
             }
 
             if (lock.owns_lock())                               // savety check
@@ -247,18 +262,16 @@ namespace logger {
 
         if (!is_init) {
 
-    		std::cerr << "Tryed to log message bevor logger was initalized. file_name[" << file_name << "] function_name[" << function_name << "] line[" << line << "] thread_id[" << thread_id << "]  MESSAGE: [" << message << "] " << std::endl;
+    		std::cerr << "Tryed to log message bevor logger was initalized. SOURCE: file_name[" << file_name << "] function_name[" << function_name << "] line[" << line << "] thread_id[" << thread_id << "]  MESSAGE: [" << message << "] " << std::endl;
             return;
         }
 
-        {
-            std::lock_guard<std::mutex> lock(queue_mutex);
-            log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
-        }
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
         cv.notify_all();
     }
 
-    void process_log_message(const message_format message) {
+    void process_log_message(const message_format&& message) {
 
         // Create Buffer vars
         std::ostringstream Format_Filled;
@@ -282,7 +295,7 @@ namespace logger {
                 case 'C':   Format_Filled << message.message; break;                                                                                                                        // input text (message)
                 case 'L':   Format_Filled << severity_names[(u8)message.msg_sev]; break;                                                                                                    // Log Level
                 case 'X':   if (message.msg_sev == severity::Info || message.msg_sev == severity::Warn) { Format_Filled << " "; } break;                                                    // Alignment
-                case 'Z':   Format_Filled << std::endl; break;                                                                                                                              // Alignment
+                case 'Z':   Format_Filled << "\n"; break;                                                                                                                              // Alignment
 
                 // ------------------------------------  Source  -------------------------------------------------------------------------------
                 case 'Q':   if (thread_lable_map.find(message.thread_id) != thread_lable_map.end()) {Format_Filled << thread_lable_map[message.thread_id]; } else { Format_Filled << message.thread_id; } break;      // Thread id or asosiated lable
@@ -324,5 +337,4 @@ namespace logger {
         if (write_logs_to_console)
             std::cout << Format_Filled.str();
     }
-
 }

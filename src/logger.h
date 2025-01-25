@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <exception>
 #include <thread>
+#include <format>
+#include <string_view>
 
 #include "util.h"
 
@@ -74,7 +76,7 @@ namespace logger {
     // @param $M thread                  Thread_id: 137575225550656 or a lable if provided
     // @param $F function name           application::main, math::foo
     // @param $P only function name      main, foo
-    // @param $A file name               main.cpp  project.cpp
+    // @param $A file name               /home/workspace/test_cpp/src/main.cpp  /home/workspace/test_cpp/src/project.cpp
     // @param $I only file name          main.cpp
     // @param $G line                    1, 42
     //
@@ -189,6 +191,7 @@ private:
 // @note LOG(Info, "This is an informational message");
 // @note LOG(Error, "An error occurred while processing the request");
 #define LOG(severity, message)              LOG_##severity(message)
+
 
 #define LOG_INIT()							LOG(Trace, "init");
 #define LOG_SHUTDOWN()						LOG(Trace, "shutdown");

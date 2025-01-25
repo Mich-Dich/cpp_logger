@@ -4,7 +4,13 @@
 #include <chrono>
 
 #include <sys/time.h>
+#include <string>
 //#include <ctime>
+
+#include <QApplication>
+#include <QFileDialog>
+#include <QString>
+#include <filesystem>
 
 namespace util {
 
@@ -43,6 +49,30 @@ namespace util {
         return loc_system_time;
     }
 
+    std::filesystem::path file_dialog(const std::string_view title, const std::vector<std::pair<std::string, std::string>>& filters) {
+        
+        int argc = 0;
+        char **argv = nullptr;
+        QApplication app(argc, argv);                                                                                                   // Create a QApplication instance
+
+        QString filterString;
+        for (auto& filter : filters) {                                                                                                  // Prepare the filter string for QFileDialog
+            
+            // Replace semicolons with spaces
+            std::string buffer = filter.second;
+            size_t pos = 0;
+            while ((pos = buffer.find(';', pos)) != std::string::npos) {                                                                // Replace ';' with ' ' 
+                buffer.replace(pos, 1, " ");
+                pos += 1;
+            }
+            
+            filterString += QString::fromStdString(filter.first) + " (" + QString::fromStdString(buffer) + ");;";
+        }
+        filterString.chop(2); // Remove the last ";;"
+
+        QString fileName = QFileDialog::getOpenFileName(nullptr, QString::fromUtf8(title.data()), QString(), filterString);             // Open the file dialog
+        return std::filesystem::path(fileName.toStdString());
+    }
 
     f32 stopwatch::stop() {
 

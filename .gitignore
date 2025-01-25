@@ -7,6 +7,8 @@ logging_test
 # results
 /logs
 logs/
+build/
+/build
 **.log
 
 # Compiled Object files

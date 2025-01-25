@@ -1,37 +1,27 @@
 
 #include "logger.h"
 #include "util.h"
-
+#include <iostream>
 
 #include <thread>
 #define LOGGING_LOOP(iterations)            for (u32 x = 0; x < iterations; x++) LOG(Trace, "Log message: " << x);
-void test_logger_multithreaded(const u32 count) {
+void multithreaded_func(const u32 count) {
 
     logger::register_label_for_thread("worker slave");
     logger::register_label_for_thread("worker 01");
 
     LOG(Debug, "Beginning test function");
     LOGGING_LOOP(count)
-    DEBUG_BREAK("Testing multithreaded DEBUG_BREAK")
+    // DEBUG_BREAK("Testing multithreaded DEBUG_BREAK")
     LOG(Debug, "Ending test function");    
 }
 
 
 // ====================================================================================================================================
-// CRASH HANDLING         need to catch signals related to termination to flash remaining log messages
+// CRASH HANDLING         need to catch signals related to termination to flash remaining log messages. Was inspired by reckless_log: https://github.com/mattiasflodin/reckless
 // ====================================================================================================================================
 
-#include <iostream>
-#include <thread>
-#include <condition_variable>
-#include <atomic>
-#include <queue>
-#include <unordered_map>
-#include <unordered_set>
-#include <string>
-#include <string_view>
 #include <cstring>
-#include <fstream>
 #include <vector>
 #include <algorithm>        // sort, unique
 #include <system_error>
@@ -99,22 +89,22 @@ void attach_crash_handler() {
 }
 
 // ====================================================================================================================================
-// CRASH HANDLING         need to catch signals related to termination to flash remaining log messages
+// CRASH HANDLING
 // ====================================================================================================================================
+
+enum class options : u8 {
+    simple = 0,
+    multithread,
+    file_dialog,
+    error_provoking,
+};
 
 int main (int argc, char* argv[]) {
 
     u16 enabled_options = 0;
-
-    LOG(Trace, "Trace log message");
-
-    attach_crash_handler();
-    logger::init("[$B$T:$J  $L$X  $A  $F:$G$E] $C$Z", true);
-
     if (argc == 1) {
-        LOG(Info, "No specivic arguments detected. Prociging with simple demo")
+        std::cout << "No specivic arguments detected. Prociging with simple demo" << std::endl;
         enabled_options |= BIT(0);
-        LOG_SEPERATOR
     } else {
 
         for (int x = 1; x < argc; x++) {            
@@ -123,15 +113,34 @@ int main (int argc, char* argv[]) {
 
             for (int y = 0; argv[x][y] != '\0'; y++) {
                 switch (argv[x][y]) {                               // register arguments
-                    case 's': enabled_options |= BIT(0); break;
-                    case 'm': enabled_options |= BIT(1); break;
+                    case 's': enabled_options |= BIT(options::simple); break;
+                    case 'm': enabled_options |= BIT(options::multithread); break;
+                    case 'd': enabled_options |= BIT(options::file_dialog); break;
+                    case 'e': enabled_options |= BIT(options::error_provoking); break;             // error provoking, loging message bevor initalizing logger
                     default: break;
                 }
             }
         }
     }
 
-    if (GET_BIT(enabled_options, 0)) {
+    if (GET_BIT(enabled_options, options::error_provoking))                                // logging a message as error
+        LOG(Trace, "Trace log message");
+
+    attach_crash_handler();
+    logger::init("[$B$T:$J  $L$X  $I $F:$G$E] $C$Z", true);
+
+    if (GET_BIT(enabled_options, options::file_dialog)) {
+        // Example usage
+        std::filesystem::path selectedFile = util::file_dialog("Select a file");
+        if (!selectedFile.empty())
+            LOG(Trace, "Selected file: " << selectedFile)
+        else
+            LOG(Trace, "No file selected.")
+
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    if (GET_BIT(enabled_options, options::simple)) {
 
         int test_int = 42;
         LOG(Trace, "Trace log message");
@@ -152,7 +161,7 @@ int main (int argc, char* argv[]) {
         VALIDATE_S(test_int == 0, )                                                     // will pass silently
         VALIDATE_S(test_int == 42, )                                                    // will log the boolean expression in a warning message
         // int debug_var = 12;
-        // DEBUG_BREAK("An error accurt. var: " << debug_var)          // disabled to continue testing
+        // DEBUG_BREAK("An error accurt. var: " << debug_var)                           // disabled to continue testing
 
         LOG_SEPERATOR
         LOG(Trace, "Testing ASSERT() macroValue of test_int: " << test_int)
@@ -160,14 +169,14 @@ int main (int argc, char* argv[]) {
         // ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
     }
 
-    if (GET_BIT(enabled_options, 1)) {
+    if (GET_BIT(enabled_options, options::multithread)) {
 
         LOG_SEPERATOR
         LOG(Trace, "Testing multithreaded logging")
-        logger::set_format("[$B$T:$J  $L$X  $Q  $A  $F:$G$E] $C$Z");
+        logger::set_format("[$B$T:$J  $L$X  $Q  $I $F:$G$E] $C$Z");
         logger::register_label_for_thread("main");
 
-        std::thread simple_worker_thread = std::thread(&test_logger_multithreaded, 10);
+        std::thread simple_worker_thread = std::thread(&multithreaded_func, 10);
         LOGGING_LOOP(10)
         simple_worker_thread.join();
     }
@@ -177,5 +186,5 @@ int main (int argc, char* argv[]) {
     return 0;
 }
 
-// clear && g++ -o logging_test main.cpp logger.cpp util.cpp -Wall -Wextra
-// ./logging_test -sm
+// sudo apt install qt5-default qttools5-dev-tools
+// clear && cppcheck --std=c++20 --enable=all .
