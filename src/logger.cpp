@@ -21,6 +21,28 @@
 #include "util.h"
 #include "logger.h"
 
+
+#define TIME_FORMATTER_PERFORMANCE
+#ifdef TIME_FORMATTER_PERFORMANCE
+    u32 formatting_counter = 0;
+    f32 cumulative_formatting_duration = 0;
+#endif
+
+
+#define TIME_LOGGING_PERFORMANCE
+#ifdef TIME_LOGGING_PERFORMANCE
+    u32 logging_counter = 0;
+    f32 cumulative_logging_duration = 0;
+#endif
+
+
+// #define TIME_COUT_PERFORMANCE
+#ifdef TIME_COUT_PERFORMANCE
+    u32 cout_counter = 0;
+    f32 cumulative_cout_duration = 0;
+#endif
+
+
 namespace logger {
 
 #define SETW(width)                                             std::setw(width) << std::setfill('0')
@@ -144,6 +166,13 @@ namespace logger {
         if (main_file.is_open())
             CLOSE_MAIN_FILE()
 
+#ifdef TIME_FORMATTER_PERFORMANCE
+        std::cout << "[LOGGER] Formatting performance: counter[" << formatting_counter << "] time[" << cumulative_formatting_duration / formatting_counter << " micro-s]" << std::endl;
+#endif
+#ifdef TIME_COUT_PERFORMANCE
+        std::cout << "[LOGGER] Cout performance: counter[" << cout_counter << "] time[" << cumulative_cout_duration / cout_counter << " micro-s]" << std::endl;
+#endif
+
         is_init = false;
     }
 
@@ -154,7 +183,7 @@ namespace logger {
     void set_format(const std::string& new_format) {
 
         // if (!is_init) {
-
+        //
     	// 	std::cerr << "Tryed to set logger format bevor logger was initalized" << std::endl;
         //     return;
         // }
@@ -273,6 +302,14 @@ namespace logger {
 
     void process_log_message(const message_format&& message) {
 
+#ifdef TIME_FORMATTER_PERFORMANCE
+
+        // tested with std::ostringstream for [100020] iterations. average duration needed: [4.57389 micro-s]
+
+        f32 formating_duration = 0;
+        util::stopwatch formatting_stopwatch = util::stopwatch(&formating_duration, util::duration_precision::microseconds);
+#endif
+
         // Create Buffer vars
         std::ostringstream Format_Filled;
         Format_Filled.flush();
@@ -295,7 +332,7 @@ namespace logger {
                 case 'C':   Format_Filled << message.message; break;                                                                                                                        // input text (message)
                 case 'L':   Format_Filled << severity_names[(u8)message.msg_sev]; break;                                                                                                    // Log Level
                 case 'X':   if (message.msg_sev == severity::Info || message.msg_sev == severity::Warn) { Format_Filled << " "; } break;                                                    // Alignment
-                case 'Z':   Format_Filled << "\n"; break;                                                                                                                              // Alignment
+                case 'Z':   Format_Filled << "\n"; break;                                                                                                                                   // Alignment
 
                 // ------------------------------------  Source  -------------------------------------------------------------------------------
                 case 'Q':   if (thread_lable_map.find(message.thread_id) != thread_lable_map.end()) {Format_Filled << thread_lable_map[message.thread_id]; } else { Format_Filled << message.thread_id; } break;      // Thread id or asosiated lable
@@ -329,12 +366,33 @@ namespace logger {
                 Format_Filled << format_current[x];
         }
 
-        std::lock_guard<std::mutex> file_lock(general_mutex);
-        OPEN_MAIN_FILE(true);
-        main_file << Format_Filled.str();
-        CLOSE_MAIN_FILE()
+#ifdef TIME_FORMATTER_PERFORMANCE
+        formatting_stopwatch.stop();
+        cumulative_formatting_duration += formating_duration;
+        formatting_counter++;
+#endif
 
-        if (write_logs_to_console)
+        {
+            std::lock_guard<std::mutex> file_lock(general_mutex);
+            OPEN_MAIN_FILE(true);
+            main_file << Format_Filled.str();
+            CLOSE_MAIN_FILE()
+        }
+
+        if (write_logs_to_console) {
+
+#ifdef TIME_COUT_PERFORMANCE
+            f32 cout_duration = 0;
+            util::stopwatch cout_stopwatch = util::stopwatch(&cout_duration, util::duration_precision::microseconds);
+#endif
             std::cout << Format_Filled.str();
+
+#ifdef TIME_COUT_PERFORMANCE
+            cout_stopwatch.stop();
+            cumulative_cout_duration += cout_duration;
+            cout_counter++;
+#endif
+        }
+
     }
 }

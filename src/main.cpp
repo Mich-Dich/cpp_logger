@@ -4,16 +4,13 @@
 #include <iostream>
 
 #include <thread>
-#define LOGGING_LOOP(iterations)            for (u32 x = 0; x < iterations; x++) LOG(Trace, "Log message: " << x);
+#define LOGGING_LOOP(iterations)            for (u32 x = 0; x < iterations; x++) { LOG(Trace, "Log message: " << x); std::this_thread::sleep_for(std::chrono::nanoseconds(100)); }
 void multithreaded_func(const u32 count) {
 
     logger::register_label_for_thread("worker slave");
-    logger::register_label_for_thread("worker 01");
+    logger::register_label_for_thread("worker 01");         // redefenition just to test error handeling
 
-    LOG(Debug, "Beginning test function");
     LOGGING_LOOP(count)
-    // DEBUG_BREAK("Testing multithreaded DEBUG_BREAK")
-    LOG(Debug, "Ending test function");    
 }
 
 
@@ -127,7 +124,7 @@ int main (int argc, char* argv[]) {
         LOG(Trace, "Trace log message");
 
     attach_crash_handler();
-    logger::init("[$B$T:$J  $L$X  $I $F:$G$E] $C$Z", true);
+    logger::init("[$B$T:$J  $L$X  $I $F:$G$E] $C$Z");
 
     if (GET_BIT(enabled_options, options::file_dialog)) {
         // Example usage
@@ -137,7 +134,7 @@ int main (int argc, char* argv[]) {
         else
             LOG(Trace, "No file selected.")
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     if (GET_BIT(enabled_options, options::simple)) {
@@ -171,14 +168,16 @@ int main (int argc, char* argv[]) {
 
     if (GET_BIT(enabled_options, options::multithread)) {
 
+        logger::register_label_for_thread("main");
+        logger::set_format("[$B$T:$J  $L$X  $Q  $I $F:$G$E] $C$Z");
         LOG_SEPERATOR
         LOG(Trace, "Testing multithreaded logging")
-        logger::set_format("[$B$T:$J  $L$X  $Q  $I $F:$G$E] $C$Z");
-        logger::register_label_for_thread("main");
 
-        std::thread simple_worker_thread = std::thread(&multithreaded_func, 10);
-        LOGGING_LOOP(10)
+        u32 count = 50000;
+        std::thread simple_worker_thread = std::thread(&multithreaded_func, count);
+        LOGGING_LOOP(count)
         simple_worker_thread.join();
+        LOG_SEPERATOR
     }
 
     logger::shutdown();
