@@ -36,10 +36,24 @@
 #endif
 
 
-// #define TIME_COUT_PERFORMANCE
+#define TIME_COUT_PERFORMANCE
 #ifdef TIME_COUT_PERFORMANCE
     u32 cout_counter = 0;
     f32 cumulative_cout_duration = 0;
+#endif
+
+
+#define TIME_QUEUE_ADDING_PERFORMANCE
+#ifdef TIME_QUEUE_ADDING_PERFORMANCE
+    u32 queue_adding_counter = 0;
+    f32 cumulative_queue_adding_duration = 0;
+#endif
+
+
+#define TIME_WRITING_TO_FILE_PERFORMANCE
+#ifdef TIME_WRITING_TO_FILE_PERFORMANCE
+    u32 writing_to_file_counter = 0;
+    f32 cumulative_writing_to_file_duration = 0;
 #endif
 
 
@@ -49,7 +63,8 @@ namespace logger {
 #define SHORT_FILE(text)                                        (strrchr(text, "\\") ? strrchr(text, "\\") + 1 : text)
 #define SHORTEN_FUNC_NAME(text)                                 (strstr(text, "::") ? strstr(text, "::") + 2 : text)
 
-#define LOGGER_FORMAT_CHANGE                                    "LOGGER format change"
+#define LOGGER_UPDATE_FORMAT                                    "LOGGER update format"
+#define LOGGER_REVERSE_FORMAT                                   "LOGGER reverse format"
 
     // const after init() and bevor shutdown()
     static bool                                                 is_init = false;
@@ -147,7 +162,6 @@ namespace logger {
 
         worker_thread = std::thread(&process_queue);
 
-        CLOSE_MAIN_FILE()
         is_init = true;
         return true;
     }
@@ -167,10 +181,16 @@ namespace logger {
             CLOSE_MAIN_FILE()
 
 #ifdef TIME_FORMATTER_PERFORMANCE
-        std::cout << "[LOGGER] Formatting performance: counter[" << formatting_counter << "] time[" << cumulative_formatting_duration / formatting_counter << " micro-s]" << std::endl;
+        std::cout << std::left << std::setw(40) << "[LOGGER] Formatting performance:" << " counter [" << std::setw(8) << formatting_counter << "] average time[" << cumulative_formatting_duration / formatting_counter << " micro-s]" << std::endl;
 #endif
 #ifdef TIME_COUT_PERFORMANCE
-        std::cout << "[LOGGER] Cout performance: counter[" << cout_counter << "] time[" << cumulative_cout_duration / cout_counter << " micro-s]" << std::endl;
+        std::cout << std::left << std::setw(40) << "[LOGGER] Cout performance:" << " counter [" << std::setw(8) << cout_counter << "] average time[" << cumulative_cout_duration / cout_counter << " micro-s]" << std::endl;
+#endif
+#ifdef TIME_QUEUE_ADDING_PERFORMANCE
+        std::cout << std::left << std::setw(40) << "[LOGGER] Queue performance:" << " counter [" << std::setw(8) << queue_adding_counter << "] average time[" << cumulative_queue_adding_duration / queue_adding_counter << " micro-s]" << std::endl;
+#endif
+#ifdef TIME_WRITING_TO_FILE_PERFORMANCE
+        std::cout << std::left << std::setw(40) << "[LOGGER] writing to file performance:" << " counter [" << std::setw(8) << writing_to_file_counter << "] average time[" << cumulative_writing_to_file_duration / writing_to_file_counter << " micro-s]" << std::endl;
 #endif
 
         is_init = false;
@@ -189,23 +209,15 @@ namespace logger {
         // }
 
         std::lock_guard<std::mutex> lock(queue_mutex);
-        log_queue.emplace(severity::Trace, "", LOGGER_FORMAT_CHANGE, 0, static_cast<std::thread::id>(0), std::move(new_format));
+        log_queue.emplace(severity::Trace, "", LOGGER_UPDATE_FORMAT, 0, static_cast<std::thread::id>(0), std::move(new_format));
         cv.notify_all();
     }
 
-    // void register_format_for_thread(const std::string& format, const std::thread::id thread_id) {
-
-    // }
-
     void use_previous_format() {
-
-        std::lock_guard<std::mutex> lock(general_mutex);
-        OPEN_MAIN_FILE(true);
-        const std::string buffer = format_current;
-        format_current = format_prev;
-        format_prev = buffer;
-        main_file << "[LOGGER] Changing to previous log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-        CLOSE_MAIN_FILE()
+        
+        std::lock_guard<std::mutex> lock(queue_mutex);
+        log_queue.emplace(severity::Trace, "", LOGGER_REVERSE_FORMAT, 0, static_cast<std::thread::id>(0), "");
+        cv.notify_all();
     }
 
     const std::string get_format() { return format_current; }
@@ -213,7 +225,6 @@ namespace logger {
     void register_label_for_thread(const std::string& thread_lable, std::thread::id thread_id) {
 
         std::lock_guard<std::mutex> lock(general_mutex);
-        OPEN_MAIN_FILE(true);
 
         if (thread_lable_map.find(thread_id) != thread_lable_map.end())
             main_file << "[LOGGER] Thread with ID: [" << thread_id << "] already has lable [" << thread_lable_map[thread_id] << "] registered. Overriding with the lable: [" << thread_lable << "]\n";
@@ -221,7 +232,6 @@ namespace logger {
             main_file << "[LOGGER] Registering Thread-ID: [" << thread_id << "] with the lable: [" << thread_lable << "]\n";
 
         thread_lable_map[thread_id] = thread_lable;
-        CLOSE_MAIN_FILE()
     }
 
     void unregister_label_for_thread(std::thread::id thread_id) {
@@ -229,16 +239,12 @@ namespace logger {
         if (thread_lable_map.find(thread_id) == thread_lable_map.end()) {
 
             std::lock_guard<std::mutex> lock(general_mutex);
-            OPEN_MAIN_FILE(true)
             main_file << "[LOGGER] Tried to unregister lable for Thread-ID: [" << thread_id << "]. IGNORED\n";
-            CLOSE_MAIN_FILE()
             return;
         }
 
         std::lock_guard<std::mutex> lock(general_mutex);
-        OPEN_MAIN_FILE(true)
         main_file << "[LOGGER] Unregistering Thread-ID: [" << thread_id << "] with the lable: [" << thread_lable_map[thread_id] << "]\n";
-        CLOSE_MAIN_FILE()
 
         thread_lable_map.erase(thread_id);
     }
@@ -247,14 +253,21 @@ namespace logger {
     // log message handeling
     // ====================================================================================================================================
 
-    void process_change_in_msg_format(const message_format msg_format) {
+    void process_update_in_msg_format(const message_format msg_format) {
 
         std::lock_guard<std::mutex> lock(general_mutex);
-        OPEN_MAIN_FILE(true)
         format_prev = format_current;
         format_current = msg_format.message;
         main_file << "[LOGGER] Changing log-format. From [" << format_prev << "] to [" << format_current << "]\n";
-        CLOSE_MAIN_FILE()
+    }
+
+    void process_reverse_in_msg_format() {
+
+        std::lock_guard<std::mutex> lock(general_mutex);
+        const std::string buffer = format_current;
+        format_current = format_prev;
+        format_prev = buffer;
+        main_file << "[LOGGER] Changing to previous log-format. From [" << format_prev << "] to [" << format_current << "]\n";
     }
 
     void process_queue() {
@@ -273,10 +286,12 @@ namespace logger {
                 log_queue.pop();
                 lock.unlock();
 
-                if (strcmp(message.function_name, LOGGER_FORMAT_CHANGE) == 0)
-                    process_change_in_msg_format(std::move(message));           // change logger format from this point onwarts
+                if (strcmp(message.function_name, LOGGER_UPDATE_FORMAT) == 0)
+                    process_update_in_msg_format(std::move(message));                   // change logger format from this point onwarts
+                else if(strcmp(message.function_name, LOGGER_REVERSE_FORMAT) == 0)
+                    process_reverse_in_msg_format();                                    // use last used format from this point onwarts
                 else
-                    process_log_message(std::move(message));                    // Process the message (format and write to file)
+                    process_log_message(std::move(message));                            // Process the message (format and write to file)
             }
 
             if (lock.owns_lock())                               // savety check
@@ -285,6 +300,11 @@ namespace logger {
     }
 
     void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string& message) {
+
+#ifdef TIME_QUEUE_ADDING_PERFORMANCE
+        f32 queue_adding_duration = 0;
+        util::stopwatch queue_adding_stopwatch = util::stopwatch(&queue_adding_duration, util::duration_precision::microseconds);
+#endif
 
         if (message.empty())
             return;                      // dont log empty lines
@@ -298,6 +318,12 @@ namespace logger {
         std::lock_guard<std::mutex> lock(queue_mutex);
         log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
         cv.notify_all();
+
+#ifdef TIME_QUEUE_ADDING_PERFORMANCE
+        queue_adding_stopwatch.stop();
+        cumulative_queue_adding_duration += queue_adding_duration;
+        queue_adding_counter++;
+#endif
     }
 
     void process_log_message(const message_format&& message) {
@@ -373,10 +399,18 @@ namespace logger {
 #endif
 
         {
+#ifdef TIME_WRITING_TO_FILE_PERFORMANCE
+            f32 write_to_file_duration = 0;
+            util::stopwatch write_to_file_stopwatch = util::stopwatch(&write_to_file_duration, util::duration_precision::microseconds);
+#endif
             std::lock_guard<std::mutex> file_lock(general_mutex);
-            OPEN_MAIN_FILE(true);
             main_file << Format_Filled.str();
-            CLOSE_MAIN_FILE()
+
+#ifdef TIME_WRITING_TO_FILE_PERFORMANCE
+            write_to_file_stopwatch.stop();
+            cumulative_writing_to_file_duration += write_to_file_duration;
+            writing_to_file_counter++;
+#endif
         }
 
         if (write_logs_to_console) {
@@ -396,3 +430,15 @@ namespace logger {
 
     }
 }
+
+// Performance in in Debug
+// [LOGGER] Formatting performance:         counter[100020  ] time[4.09833 micro-s]
+// [LOGGER] Cout performance:               counter[100020  ] time[2.42007 micro-s]
+// [LOGGER] Queue performance:              counter[100020  ] time[1.13808 micro-s]
+// [LOGGER] writing to file performance:    counter[100020  ] time[0.42962 micro-s]
+
+// Performance in in Release
+// [LOGGER] Formatting performance:         counter[100020  ] time[3.22272 micro-s]
+// [LOGGER] Cout performance:               counter[100020  ] time[2.31022 micro-s]
+// [LOGGER] Queue performance:              counter[100020  ] time[0.881386 micro-s]
+// [LOGGER] writing to file performance:    counter[100020  ] time[0.304581 micro-s]

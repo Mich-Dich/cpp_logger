@@ -101,7 +101,7 @@ int main (int argc, char* argv[]) {
     u16 enabled_options = 0;
     if (argc == 1) {
         std::cout << "No specivic arguments detected. Prociging with simple demo" << std::endl;
-        enabled_options |= BIT(0);
+        // enabled_options |= BIT(0);
     } else {
 
         for (int x = 1; x < argc; x++) {            
@@ -124,7 +124,16 @@ int main (int argc, char* argv[]) {
         LOG(Trace, "Trace log message");
 
     attach_crash_handler();
-    logger::init("[$B$T:$J  $L$X  $I $F:$G$E] $C$Z");
+    logger::init("[$B$T:$J  $L$X  $I $F:$G$E] $C$Z", true);
+
+
+
+    std::string name = "Alice";
+    int age = 30;
+    std::string formatted = std::format("{} is {} years old.", name, age);
+    std::cout << formatted << std::endl; // Output: Alice is 30 years old.
+
+
 
     if (GET_BIT(enabled_options, options::file_dialog)) {
         // Example usage
@@ -134,7 +143,7 @@ int main (int argc, char* argv[]) {
         else
             LOG(Trace, "No file selected.")
 
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     if (GET_BIT(enabled_options, options::simple)) {

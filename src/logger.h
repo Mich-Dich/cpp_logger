@@ -220,9 +220,9 @@ private:
 
 #if ENABLE_LOGGING_OF_VALIDATION
     #define VALIDATE(expr, command, successMsg, failureMsg)			        \
-                    if (expr) 												\
-                        LOG(Trace, successMsg)							    \
-                    else {													\
+                    if (expr)                                               \
+                        LOG(Trace, successMsg)                              \
+                    else {												    \
                         LOG(Warn, failureMsg)							    \
                         command;										    \
                     }
