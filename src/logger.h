@@ -8,6 +8,16 @@
 
 #include "util.h"
 
+#define TIME_MAIN_THREAD_PERFORMANCE
+#ifdef TIME_MAIN_THREAD_PERFORMANCE
+
+    #define START_DEBUG_TIMER(name)               f32 name##_duration = 0; util::stopwatch name##_stopwatch = util::stopwatch(&name##_duration, util::duration_precision::microseconds);
+    #define END_DEBUG_TIMER(name)                 name##_stopwatch.stop(); get_##cumulative_##name##_duration() += name##_duration; get_##name##_counter()++;
+    u32& get_main_thread_counter();
+    f32& get_cumulative_main_thread_duration();
+
+#endif
+
 namespace logger {
 
     // Define the severity levels for logging
@@ -137,6 +147,9 @@ private:
 // @note Constructs a detailed message containing the file name, function name, and line number
 #define DEBUG_BREAK(message)                { std::ostringstream oss; oss << "DEBUG BREAK [file: " << __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message; throw debug_break_exception(oss.str()); }
 
+// #define DEBUG_BREAK(message)                { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); std::abort(); }
+
+
 // This define enables the diffrent log levels (FATAL & ERROR are always on)
 //  0 => FATAL + ERROR
 //  1 => FATAL + ERROR + WARN
@@ -155,6 +168,7 @@ private:
 
 // always enabled
 #define LOG_Fatal(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
+
 #define LOG_Error(message)                  { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Error, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); }
 
 #if LOG_LEVEL_ENABLED > 0
@@ -190,7 +204,7 @@ private:
 // @note This macro resolves to one of the specific logging macros (e.g., LOG_Trace, LOG_Debug) based on the provided severity
 // @note LOG(Info, "This is an informational message");
 // @note LOG(Error, "An error occurred while processing the request");
-#define LOG(severity, message)              LOG_##severity(message)
+#define LOG(severity, message)              { START_DEBUG_TIMER(main_thread) LOG_##severity(message) END_DEBUG_TIMER(main_thread) }
 
 
 #define LOG_INIT()							LOG(Trace, "init");

@@ -11,6 +11,7 @@ void multithreaded_func(const u32 count) {
     logger::register_label_for_thread("worker 01");         // redefenition just to test error handeling
 
     LOGGING_LOOP(count)
+    // DEBUG_BREAK("intantional debug-break in diffrent thread")
 }
 
 
@@ -42,7 +43,9 @@ void detach_crash_handler() {
     }
 }
 
-void signal_handler(int) {
+void signal_handler(const int signal) {
+
+    std::cout << "signal detected [" << signal << "]" << std::endl;
 
     logger::shutdown();
     detach_crash_handler();
@@ -96,98 +99,49 @@ enum class options : u8 {
     error_provoking,
 };
 
-int main (int argc, char* argv[]) {
-
-    u16 enabled_options = 0;
-    if (argc == 1) {
-        std::cout << "No specivic arguments detected. Prociging with simple demo" << std::endl;
-        // enabled_options |= BIT(0);
-    } else {
-
-        for (int x = 1; x < argc; x++) {            
-            if (argv[x][0] != '-')                                  // Not an option because it doesnt start with '-'
-                continue;
-
-            for (int y = 0; argv[x][y] != '\0'; y++) {
-                switch (argv[x][y]) {                               // register arguments
-                    case 's': enabled_options |= BIT(options::simple); break;
-                    case 'm': enabled_options |= BIT(options::multithread); break;
-                    case 'd': enabled_options |= BIT(options::file_dialog); break;
-                    case 'e': enabled_options |= BIT(options::error_provoking); break;             // error provoking, loging message bevor initalizing logger
-                    default: break;
-                }
-            }
-        }
-    }
-
-    if (GET_BIT(enabled_options, options::error_provoking))                                // logging a message as error
-        LOG(Trace, "Trace log message");
+int main () {
 
     attach_crash_handler();
     logger::init("[$B$T:$J  $L$X  $I $F:$G$E] $C$Z", true);
 
+    int test_int = 42;
+    LOG(Trace, "Trace log message");
+    LOG(Debug, "Debug log message with var: " << test_int);
+    LOG(Info, "Info log message with var: " << test_int);
+    LOG(Warn, "Warn log message with var: " << test_int);
+    LOG(Error, "Error log message with var: " << test_int);
+    LOG(Fatal, "Fatal log message with var: " << test_int);
 
+    LOG_SEPERATOR
+    LOG(Trace, "Testing VALIDATE() macro");
+    VALIDATE(test_int == 42, , "VALIDATE (test_int == 42) correct", "VALIDATE false")
+    VALIDATE(test_int == 0, , "VALIDATE (test_int == 0) correct", "VALIDATE (test_int == 0) false , no aditional commands")
+    VALIDATE(test_int == 0, test_int = 0, "VALIDATE (test_int == 0) correct", "VALIDATE (test_int == 0) false , setting [test_int] to 0")
 
-    std::string name = "Alice";
-    int age = 30;
-    std::string formatted = std::format("{} is {} years old.", name, age);
-    std::cout << formatted << std::endl; // Output: Alice is 30 years old.
+    LOG_SEPERATOR
+    LOG(Trace, "Testing VALIDATE_S() macroValue of test_int: " << test_int)
+    VALIDATE_S(test_int == 0, )                                                     // will pass silently
+    VALIDATE_S(test_int == 42, )                                                    // will log the boolean expression in a warning message
+    // int debug_var = 12;
+    // DEBUG_BREAK("An error accurt. var: " << debug_var)                           // disabled to continue testing
 
+    LOG_SEPERATOR
+    LOG(Trace, "Testing ASSERT() macroValue of test_int: " << test_int)
+    ASSERT(test_int == 0, "ASSERT(test_int == 0): correct", "assert 0: FALSE")
+    // ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
 
+    logger::register_label_for_thread("main");
+    logger::set_format("[$B$T:$J  $L$X  $Q  $I $F:$G$E] $C$Z");
+    LOG_SEPERATOR
+    LOG(Trace, "Testing multithreaded logging")
 
-    if (GET_BIT(enabled_options, options::file_dialog)) {
-        // Example usage
-        std::filesystem::path selectedFile = util::file_dialog("Select a file");
-        if (!selectedFile.empty())
-            LOG(Trace, "Selected file: " << selectedFile)
-        else
-            LOG(Trace, "No file selected.")
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    if (GET_BIT(enabled_options, options::simple)) {
-
-        int test_int = 42;
-        LOG(Trace, "Trace log message");
-        LOG(Debug, "Debug log message with var: " << test_int);
-        LOG(Info, "Info log message with var: " << test_int);
-        LOG(Warn, "Warn log message with var: " << test_int);
-        LOG(Error, "Error log message with var: " << test_int);
-        LOG(Fatal, "Fatal log message with var: " << test_int);
-
-        LOG_SEPERATOR
-        LOG(Trace, "Testing VALIDATE() macro");
-        VALIDATE(test_int == 42, , "VALIDATE (test_int == 42) correct", "VALIDATE false")
-        VALIDATE(test_int == 0, , "VALIDATE (test_int == 0) correct", "VALIDATE (test_int == 0) false , no aditional commands")
-        VALIDATE(test_int == 0, test_int = 0, "VALIDATE (test_int == 0) correct", "VALIDATE (test_int == 0) false , setting [test_int] to 0")
-
-        LOG_SEPERATOR
-        LOG(Trace, "Testing VALIDATE_S() macroValue of test_int: " << test_int)
-        VALIDATE_S(test_int == 0, )                                                     // will pass silently
-        VALIDATE_S(test_int == 42, )                                                    // will log the boolean expression in a warning message
-        // int debug_var = 12;
-        // DEBUG_BREAK("An error accurt. var: " << debug_var)                           // disabled to continue testing
-
-        LOG_SEPERATOR
-        LOG(Trace, "Testing ASSERT() macroValue of test_int: " << test_int)
-        ASSERT(test_int == 0, "ASSERT(test_int == 0): correct", "assert 0: FALSE")
-        // ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
-    }
-
-    if (GET_BIT(enabled_options, options::multithread)) {
-
-        logger::register_label_for_thread("main");
-        logger::set_format("[$B$T:$J  $L$X  $Q  $I $F:$G$E] $C$Z");
-        LOG_SEPERATOR
-        LOG(Trace, "Testing multithreaded logging")
-
-        u32 count = 50000;
-        std::thread simple_worker_thread = std::thread(&multithreaded_func, count);
-        LOGGING_LOOP(count)
+    u32 count = 50000;
+    std::thread simple_worker_thread = std::thread(&multithreaded_func, count);
+    LOGGING_LOOP(count)
+    // DEBUG_BREAK("Intentional calling of DEBUG_BREAK")
+    if (simple_worker_thread.joinable())
         simple_worker_thread.join();
-        LOG_SEPERATOR
-    }
+    LOG_SEPERATOR
 
     logger::shutdown();
     detach_crash_handler();

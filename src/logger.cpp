@@ -22,10 +22,19 @@
 #include "logger.h"
 
 
+#define START_TIMER(name)                           f32 name##_duration = 0; util::stopwatch name##_stopwatch = util::stopwatch(&name##_duration, util::duration_precision::microseconds);
+#define END_TIMER(name)                             name##_stopwatch.stop(); cumulative_##name##_duration += name##_duration; name##_counter++;
+
 #define TIME_FORMATTER_PERFORMANCE
 #ifdef TIME_FORMATTER_PERFORMANCE
     u32 formatting_counter = 0;
     f32 cumulative_formatting_duration = 0;
+
+    #define START_FORMATTING_TIMER                  START_TIMER(formatting)
+    #define END_FORMATTING_TIMER                    END_TIMER(formatting)
+#else
+    #define START_FORMATTING_TIMER
+    #define END_FORMATTING_TIMER
 #endif
 
 
@@ -33,6 +42,12 @@
 #ifdef TIME_LOGGING_PERFORMANCE
     u32 logging_counter = 0;
     f32 cumulative_logging_duration = 0;
+
+    #define START_LOGGONG_TIMER                     START_TIMER(logging)
+    #define END_LOGGONG_TIMER                       END_TIMER(logging)
+#else
+    #define START_LOGGONG_TIMER
+    #define END_LOGGONG_TIMER
 #endif
 
 
@@ -40,6 +55,12 @@
 #ifdef TIME_COUT_PERFORMANCE
     u32 cout_counter = 0;
     f32 cumulative_cout_duration = 0;
+
+    #define START_COUT_TIMER                        START_TIMER(cout)
+    #define END_COUT_TIMER                          END_TIMER(cout)
+#else
+    #define START_COUT_TIMER
+    #define END_COUT_TIMER
 #endif
 
 
@@ -47,6 +68,12 @@
 #ifdef TIME_QUEUE_ADDING_PERFORMANCE
     u32 queue_adding_counter = 0;
     f32 cumulative_queue_adding_duration = 0;
+
+    #define START_QUEUE_ADDING_TIMER                START_TIMER(queue_adding)
+    #define END_QUEUE_ADDING_TIMER                  END_TIMER(queue_adding)
+#else
+    #define START_QUEUE_ADDING_TIMER
+    #define END_QUEUE_ADDING_TIMER
 #endif
 
 
@@ -54,6 +81,20 @@
 #ifdef TIME_WRITING_TO_FILE_PERFORMANCE
     u32 writing_to_file_counter = 0;
     f32 cumulative_writing_to_file_duration = 0;
+
+    #define START_WRITING_TO_FILE_TIMER             START_TIMER(writing_to_file)
+    #define END_WRITING_TO_FILE_TIMER               END_TIMER(writing_to_file)
+#else
+    #define START_WRITING_TO_FILE_TIMER
+    #define END_WRITING_TO_FILE_TIMER
+#endif
+
+#ifdef TIME_MAIN_THREAD_PERFORMANCE
+    u32 main_thread_counter = 0;
+    f32 cumulative_main_thread_duration = 0;
+    
+    u32& get_main_thread_counter() { return main_thread_counter; }
+    f32& get_cumulative_main_thread_duration() { return cumulative_main_thread_duration; }
 #endif
 
 
@@ -193,6 +234,11 @@ namespace logger {
         std::cout << std::left << std::setw(40) << "[LOGGER] writing to file performance:" << " counter [" << std::setw(8) << writing_to_file_counter << "] average time[" << cumulative_writing_to_file_duration / writing_to_file_counter << " micro-s]" << std::endl;
 #endif
 
+
+#ifdef TIME_MAIN_THREAD_PERFORMANCE
+        std::cout << std::left << std::setw(40) << "[LOGGER] main-thread logger performance:" << " counter [" << std::setw(8) << main_thread_counter << "] average time[" << cumulative_main_thread_duration / main_thread_counter << " micro-s]" << std::endl;
+#endif
+
         is_init = false;
     }
 
@@ -200,13 +246,13 @@ namespace logger {
     // settings
     // ====================================================================================================================================
 
-    void set_format(const std::string& new_format) {
+    void set_format(const std::string& new_format) {        // needed to insert this into the queue to preserve the order
 
-        // if (!is_init) {
-        //
-    	// 	std::cerr << "Tryed to set logger format bevor logger was initalized" << std::endl;
-        //     return;
-        // }
+        if (!is_init) {
+        
+    		std::cerr << "Tryed to set logger format bevor logger was initalized" << std::endl;
+            return;
+        }
 
         std::lock_guard<std::mutex> lock(queue_mutex);
         log_queue.emplace(severity::Trace, "", LOGGER_UPDATE_FORMAT, 0, static_cast<std::thread::id>(0), std::move(new_format));
@@ -275,7 +321,7 @@ namespace logger {
         while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
 
             std::unique_lock<std::mutex> lock(queue_mutex);
-            cv.wait(lock, [] { return !log_queue.empty(); });
+            cv.wait(lock, [] { return !stop || !log_queue.empty(); });
 
             while (!log_queue.empty()) {
 
@@ -301,10 +347,7 @@ namespace logger {
 
     void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string& message) {
 
-#ifdef TIME_QUEUE_ADDING_PERFORMANCE
-        f32 queue_adding_duration = 0;
-        util::stopwatch queue_adding_stopwatch = util::stopwatch(&queue_adding_duration, util::duration_precision::microseconds);
-#endif
+        START_QUEUE_ADDING_TIMER
 
         if (message.empty())
             return;                      // dont log empty lines
@@ -315,26 +358,18 @@ namespace logger {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
-        cv.notify_all();
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
+            cv.notify_all();
+        }
 
-#ifdef TIME_QUEUE_ADDING_PERFORMANCE
-        queue_adding_stopwatch.stop();
-        cumulative_queue_adding_duration += queue_adding_duration;
-        queue_adding_counter++;
-#endif
+        END_QUEUE_ADDING_TIMER
     }
 
     void process_log_message(const message_format&& message) {
 
-#ifdef TIME_FORMATTER_PERFORMANCE
-
-        // tested with std::ostringstream for [100020] iterations. average duration needed: [4.57389 micro-s]
-
-        f32 formating_duration = 0;
-        util::stopwatch formatting_stopwatch = util::stopwatch(&formating_duration, util::duration_precision::microseconds);
-#endif
+        START_FORMATTING_TIMER
 
         // Create Buffer vars
         std::ostringstream Format_Filled;
@@ -392,53 +427,41 @@ namespace logger {
                 Format_Filled << format_current[x];
         }
 
-#ifdef TIME_FORMATTER_PERFORMANCE
-        formatting_stopwatch.stop();
-        cumulative_formatting_duration += formating_duration;
-        formatting_counter++;
-#endif
+        END_FORMATTING_TIMER
 
         {
-#ifdef TIME_WRITING_TO_FILE_PERFORMANCE
-            f32 write_to_file_duration = 0;
-            util::stopwatch write_to_file_stopwatch = util::stopwatch(&write_to_file_duration, util::duration_precision::microseconds);
+#ifdef TIME_WRITING_TO_FILE_PERFORMANCE            
+            START_TIMER(writing_to_file)
 #endif
             std::lock_guard<std::mutex> file_lock(general_mutex);
             main_file << Format_Filled.str();
 
 #ifdef TIME_WRITING_TO_FILE_PERFORMANCE
-            write_to_file_stopwatch.stop();
-            cumulative_writing_to_file_duration += write_to_file_duration;
-            writing_to_file_counter++;
+            END_TIMER(writing_to_file)
 #endif
         }
 
         if (write_logs_to_console) {
 
-#ifdef TIME_COUT_PERFORMANCE
-            f32 cout_duration = 0;
-            util::stopwatch cout_stopwatch = util::stopwatch(&cout_duration, util::duration_precision::microseconds);
-#endif
+            START_COUT_TIMER
             std::cout << Format_Filled.str();
-
-#ifdef TIME_COUT_PERFORMANCE
-            cout_stopwatch.stop();
-            cumulative_cout_duration += cout_duration;
-            cout_counter++;
-#endif
+            END_COUT_TIMER
         }
 
     }
 }
 
 // Performance in in Debug
-// [LOGGER] Formatting performance:         counter[100020  ] time[4.09833 micro-s]
-// [LOGGER] Cout performance:               counter[100020  ] time[2.42007 micro-s]
-// [LOGGER] Queue performance:              counter[100020  ] time[1.13808 micro-s]
-// [LOGGER] writing to file performance:    counter[100020  ] time[0.42962 micro-s]
+// [LOGGER] Formatting performance:         counter [100020  ] average time[3.31754 micro-s]
+// [LOGGER] Cout performance:               counter [100020  ] average time[2.52044 micro-s]
+// [LOGGER] Queue performance:              counter [100002  ] average time[1.08833 micro-s]
+// [LOGGER] writing to file performance:    counter [100020  ] average time[0.288061 micro-s]
+// [LOGGER] main-thread logger performance: counter [99960   ] average time[1.74922 micro-s]
+
 
 // Performance in in Release
-// [LOGGER] Formatting performance:         counter[100020  ] time[3.22272 micro-s]
-// [LOGGER] Cout performance:               counter[100020  ] time[2.31022 micro-s]
-// [LOGGER] Queue performance:              counter[100020  ] time[0.881386 micro-s]
-// [LOGGER] writing to file performance:    counter[100020  ] time[0.304581 micro-s]
+// [LOGGER] Formatting performance:         counter [100020  ] average time[2.77883 micro-s]
+// [LOGGER] Cout performance:               counter [100020  ] average time[2.15493 micro-s]
+// [LOGGER] Queue performance:              counter [99984   ] average time[0.836054 micro-s]
+// [LOGGER] writing to file performance:    counter [100020  ] average time[0.234056 micro-s]
+// [LOGGER] main-thread logger performance: counter [99960   ] average time[1.34379 micro-s]
