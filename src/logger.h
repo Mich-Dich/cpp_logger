@@ -145,7 +145,7 @@ private:
 // @param message The custom message to include in the debug break exception
 // @note DEBUG_BREAK Triggers a debug break exception with a formatted message
 // @note Constructs a detailed message containing the file name, function name, and line number
-#define DEBUG_BREAK(message)                { std::ostringstream oss; oss << "DEBUG BREAK [file: " << __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message; throw debug_break_exception(oss.str()); }
+#define DEBUG_BREAK(message)             { std::ostringstream oss; oss << "DEBUG BREAK [file: " << __FILE__ << ", function: " << __FUNCTION__ << ", line: " << __LINE__ << "] => "<< message; throw debug_break_exception(oss.str()); }
 
 // #define DEBUG_BREAK(message)                { std::ostringstream oss; oss << message; logger::log_msg(logger::severity::Fatal, __FILE__, __FUNCTION__, __LINE__, std::this_thread::get_id(), oss.str()); std::abort(); }
 
@@ -197,6 +197,10 @@ private:
     #define LOG_SEPERATOR                   { }
 #endif
 
+namespace logger {
+    std::mutex& get_timing_mutex();
+}
+
 // General logging macro for all severity levels
 // @note LOG Routes log messages to the appropriate severity level
 // @param severity The severity level of the log (e.g., Trace, Debug, Info, Warn, Error, Fatal)
@@ -204,7 +208,8 @@ private:
 // @note This macro resolves to one of the specific logging macros (e.g., LOG_Trace, LOG_Debug) based on the provided severity
 // @note LOG(Info, "This is an informational message");
 // @note LOG(Error, "An error occurred while processing the request");
-#define LOG(severity, message)              { START_DEBUG_TIMER(main_thread) LOG_##severity(message) END_DEBUG_TIMER(main_thread) }
+// #define LOG(severity, message)              { std::lock_guard<std::mutex> timing_lock(logger::get_timing_mutex()); START_DEBUG_TIMER(main_thread) LOG_##severity(message) END_DEBUG_TIMER(main_thread) }
+#define LOG(severity, message)              LOG_##severity(message)
 
 
 #define LOG_INIT()							LOG(Trace, "init");

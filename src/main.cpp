@@ -48,6 +48,8 @@ void signal_handler(const int signal) {
     std::cout << "signal detected [" << signal << "]" << std::endl;
 
     logger::shutdown();
+
+    std::cout << "detach_crash_handler" << std::endl;
     detach_crash_handler();
 }
 
@@ -127,7 +129,7 @@ int main () {
 
     LOG_SEPERATOR
     LOG(Trace, "Testing ASSERT() macroValue of test_int: " << test_int)
-    ASSERT(test_int == 0, "ASSERT(test_int == 0): correct", "assert 0: FALSE")
+    // ASSERT(test_int == 0, "ASSERT(test_int == 0): correct", "assert 0: FALSE")
     // ASSERT(test_int == 42, "assert 0: correct", "assert 0: FALSE")
 
     logger::register_label_for_thread("main");
@@ -135,10 +137,10 @@ int main () {
     LOG_SEPERATOR
     LOG(Trace, "Testing multithreaded logging")
 
-    u32 count = 50000;
+    u32 count = 500;
     std::thread simple_worker_thread = std::thread(&multithreaded_func, count);
     LOGGING_LOOP(count)
-    // DEBUG_BREAK("Intentional calling of DEBUG_BREAK")
+    DEBUG_BREAK("Intentional calling of DEBUG_BREAK")
     if (simple_worker_thread.joinable())
         simple_worker_thread.join();
     LOG_SEPERATOR
@@ -150,3 +152,12 @@ int main () {
 
 // sudo apt install qt5-default qttools5-dev-tools
 // clear && cppcheck --std=c++20 --enable=all .
+
+
+
+
+    // {
+    //     std::ostringstream oss;
+    //     oss << "value of int: " << test_int;
+    //     logger::log_msg(logger::severity::Debug, __FILE__, __FUNCTION__, __LINE__, oss.str());
+    // }

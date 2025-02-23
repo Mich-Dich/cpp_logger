@@ -18,6 +18,10 @@
     #include <ctime>
 #endif
 
+#ifdef BOOST_AVAILABLE
+    #include <boost/lockfree/queue.hpp>
+#endif
+
 #include "util.h"
 #include "logger.h"
 
@@ -107,6 +111,17 @@ namespace logger {
 #define LOGGER_UPDATE_FORMAT                                    "LOGGER update format"
 #define LOGGER_REVERSE_FORMAT                                   "LOGGER reverse format"
 
+
+
+
+
+    static std::mutex                                           timing_mutex{};
+    std::mutex& get_timing_mutex()                              { return timing_mutex; }
+
+
+
+
+
     // const after init() and bevor shutdown()
     static bool                                                 is_init = false;
     static bool                                                 write_logs_to_console = false;
@@ -118,13 +133,13 @@ namespace logger {
     static std::condition_variable                              cv{};
     static std::mutex                                           queue_mutex{};                      // only queue related
     static std::mutex                                           general_mutex{};                    // for everything else
-    static std::atomic<bool>                                    ready = false;
+    // static std::atomic<bool>                                    ready = false;
     static std::atomic<bool>                                    stop = false;
 
     // always const variables
-    static std::string_view                                     severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
-    static std::string_view                                     console_reset = "\x1b[0m";
-    static std::string_view                                     console_color_table[] = {
+    const std::string_view                                      severity_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
+    const std::string_view                                      console_reset = "\x1b[0m";
+    const std::string_view                                      console_color_table[] = {
         "\x1b[38;5;246m",                                           // Trace: Gray
         "\x1b[94m",                                                 // Debug: Blue
         "\x1b[92m",                                                 // Info: Green
@@ -136,8 +151,8 @@ namespace logger {
     static std::string                                          format_current = "";
     static std::string                                          format_prev = "";
     static std::ofstream                                        main_file;
-    static std::queue<message_format>                           log_queue{};
     static std::unordered_map<std::thread::id, std::string>     thread_lable_map = {};
+    static std::queue<message_format>                           log_queue{};
 
     void process_queue();
     void process_log_message(const message_format&& message);
@@ -185,7 +200,9 @@ namespace logger {
         main_log_dir = log_dir;
         main_log_file_path = log_dir / main_log_file_name;
 
-        OPEN_MAIN_FILE(use_append_mode)
+        main_file = std::ofstream(main_log_file_path, (use_append_mode) ? std::ios::app : std::ios::out);
+            if (!main_file.is_open())
+                DEBUG_BREAK("FAILED to open log main_file")
 
         if (use_append_mode)
             main_file << "\n=============================================================================\n";
@@ -221,7 +238,7 @@ namespace logger {
         if (main_file.is_open())
             CLOSE_MAIN_FILE()
 
-#ifdef TIME_FORMATTER_PERFORMANCE
+            #ifdef TIME_FORMATTER_PERFORMANCE
         std::cout << std::left << std::setw(40) << "[LOGGER] Formatting performance:" << " counter [" << std::setw(8) << formatting_counter << "] average time[" << cumulative_formatting_duration / formatting_counter << " micro-s]" << std::endl;
 #endif
 #ifdef TIME_COUT_PERFORMANCE
@@ -233,7 +250,6 @@ namespace logger {
 #ifdef TIME_WRITING_TO_FILE_PERFORMANCE
         std::cout << std::left << std::setw(40) << "[LOGGER] writing to file performance:" << " counter [" << std::setw(8) << writing_to_file_counter << "] average time[" << cumulative_writing_to_file_duration / writing_to_file_counter << " micro-s]" << std::endl;
 #endif
-
 
 #ifdef TIME_MAIN_THREAD_PERFORMANCE
         std::cout << std::left << std::setw(40) << "[LOGGER] main-thread logger performance:" << " counter [" << std::setw(8) << main_thread_counter << "] average time[" << cumulative_main_thread_duration / main_thread_counter << " micro-s]" << std::endl;
@@ -317,53 +333,49 @@ namespace logger {
     }
 
     void process_queue() {
-
-        while (!stop || !log_queue.empty()) { // Continue until stop is true and the queue is empty
-
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            cv.wait(lock, [] { return !stop || !log_queue.empty(); });
-
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        while (!stop) {
+            // Wait until there is a message in the queue or stop is signaled
+            cv.wait(lock, [] { return !log_queue.empty() || stop; });
+    
+            // Process all messages in the queue
             while (!log_queue.empty()) {
-
-                // get message from queue
-                if (!lock.owns_lock())
-                    lock.lock();
+                // Get message from queue
                 message_format message = std::move(log_queue.front());
                 log_queue.pop();
-                lock.unlock();
-
+                lock.unlock(); // Unlock while processing the message
+    
                 if (strcmp(message.function_name, LOGGER_UPDATE_FORMAT) == 0)
-                    process_update_in_msg_format(std::move(message));                   // change logger format from this point onwarts
-                else if(strcmp(message.function_name, LOGGER_REVERSE_FORMAT) == 0)
-                    process_reverse_in_msg_format();                                    // use last used format from this point onwarts
+                    process_update_in_msg_format(std::move(message));
+                else if (strcmp(message.function_name, LOGGER_REVERSE_FORMAT) == 0)
+                    process_reverse_in_msg_format();
                 else
-                    process_log_message(std::move(message));                            // Process the message (format and write to file)
+                    process_log_message(std::move(message));
+    
+                lock.lock(); // Re-lock for the next iteration
             }
-
-            if (lock.owns_lock())                               // savety check
-                lock.unlock();
         }
     }
 
     void log_msg(const severity msg_sev , const char* file_name, const char* function_name, const int line, const std::thread::id thread_id, const std::string& message) {
 
-        START_QUEUE_ADDING_TIMER
 
         if (message.empty())
             return;                      // dont log empty lines
 
+        
         if (!is_init) {
 
     		std::cerr << "Tryed to log message bevor logger was initalized. SOURCE: file_name[" << file_name << "] function_name[" << function_name << "] line[" << line << "] thread_id[" << thread_id << "]  MESSAGE: [" << message << "] " << std::endl;
             return;
         }
 
+        START_QUEUE_ADDING_TIMER
         {
             std::lock_guard<std::mutex> lock(queue_mutex);
             log_queue.emplace(msg_sev, file_name, function_name, line, thread_id, std::move(message));
-            cv.notify_all();
         }
-
+        cv.notify_all();
         END_QUEUE_ADDING_TIMER
     }
 
@@ -396,7 +408,8 @@ namespace logger {
                 case 'Z':   Format_Filled << "\n"; break;                                                                                                                                   // Alignment
 
                 // ------------------------------------  Source  -------------------------------------------------------------------------------
-                case 'Q':   if (thread_lable_map.find(message.thread_id) != thread_lable_map.end()) {Format_Filled << thread_lable_map[message.thread_id]; } else { Format_Filled << message.thread_id; } break;      // Thread id or asosiated lable
+                case 'Q':   if (thread_lable_map.find(message.thread_id) != thread_lable_map.end()) {Format_Filled << thread_lable_map[message.thread_id]; } 
+                                                                                                    else { Format_Filled << message.thread_id; } break;                                     // Thread id or asosiated lable
                 case 'F':   Format_Filled << message.function_name; break;                                                                                                                  // Function Name
                 case 'P':   Format_Filled << SHORTEN_FUNC_NAME(message.function_name); break;                                                                                               // Function Name
                 case 'A':   Format_Filled << message.file_name; break;                                                                                                                      // File Name
@@ -452,11 +465,11 @@ namespace logger {
 }
 
 // Performance in in Debug
-// [LOGGER] Formatting performance:         counter [100020  ] average time[3.31754 micro-s]
-// [LOGGER] Cout performance:               counter [100020  ] average time[2.52044 micro-s]
-// [LOGGER] Queue performance:              counter [100002  ] average time[1.08833 micro-s]
-// [LOGGER] writing to file performance:    counter [100020  ] average time[0.288061 micro-s]
-// [LOGGER] main-thread logger performance: counter [99960   ] average time[1.74922 micro-s]
+// [LOGGER] Formatting performance:         counter [100019  ] average time[3.48874 micro-s]
+// [LOGGER] Cout performance:               counter [0       ] average time[2.52044 micro-s]
+// [LOGGER] Queue performance:              counter [100019  ] average time[1.88762 micro-s]
+// [LOGGER] writing to file performance:    counter [100019  ] average time[0.316292 micro-s]
+// [LOGGER] main-thread logger performance: counter [100014  ] average time[2.65588 micro-s]
 
 
 // Performance in in Release
